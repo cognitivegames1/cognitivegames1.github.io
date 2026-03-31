@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Play — Cognitive Games</title>
+    <meta name="robots" content="noindex,follow" />
+    <link rel="canonical" href="/play.html" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800&family=JetBrains+Mono:wght@500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="css/chessboard.css"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body class="play-body">
+    <header class="play-top">
+      <a class="back-link" href="index.html">← Lobby</a>
+      <h1 id="play-title">Game</h1>
+      <div class="stat-bar">
+        <span class="stat timer" id="stat-time" aria-live="polite">0.00s</span>
+        <span class="stat score" id="stat-score" aria-live="polite">Score: 0</span>
+        <button type="button" class="btn-restart" id="btn-restart">Restart</button>
+      </div>
+    </header>
+
+    <main class="play-main">
+      <section class="instructions" id="instructions-panel">
+        <div id="instructions-text"></div>
+        <div class="instructions-actions">
+          <button type="button" class="btn-primary" id="btn-start-round">
+            Start round
+          </button>
+        </div>
+      </section>
+
+      <div id="game-root"></div>
+
+      <section class="result-panel hidden" id="result-panel" aria-live="polite">
+        <h2 id="result-title">Round complete</h2>
+        <p id="result-detail"></p>
+        <button type="button" class="btn-primary" id="btn-play-again">Play again</button>
+      </section>
+    </main>
+
+    <script src="js/lib/jquery-3.7.1.min.js"></script>
+    <script src="js/lib/chessboard.js"></script>
+    <script type="module" src="js/play.js"></script>
+  </body>
+</html>
