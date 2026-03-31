@@ -1,6 +1,6 @@
 /** @type {readonly string[]} */
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
-const PIECE_THEME = "css/{piece}.png";
+const PIECE_THEME = `${new URL("../../css/", import.meta.url).href}{piece}.png`;
 
 const PIECE_CHARS = {
   K: "♔",
