@@ -4,6 +4,9 @@
     <loc>/index.html</loc>
   </url>
   <url>
+    <loc>/games/cognitive-snapshot.html</loc>
+  </url>
+  <url>
     <loc>/games/chess-glance.html</loc>
   </url>
   <url>
@@ -16,15 +19,6 @@
     <loc>/games/sequence-echo.html</loc>
   </url>
   <url>
-    <loc>/games/n-back-grid.html</loc>
-  </url>
-  <url>
-    <loc>/games/icon-back.html</loc>
-  </url>
-  <url>
-    <loc>/games/reverse-echo.html</loc>
-  </url>
-  <url>
     <loc>/games/pair-recall.html</loc>
   </url>
   <url>
@@ -35,11 +29,5 @@
   </url>
   <url>
     <loc>/games/color-word-clash.html</loc>
-  </url>
-  <url>
-    <loc>/games/reaction-gate.html</loc>
-  </url>
-  <url>
-    <loc>/games/target-count.html</loc>
   </url>
 </urlset>

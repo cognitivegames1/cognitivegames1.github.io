@@ -17,6 +17,12 @@ const PIECE_CHARS = {
   p: "♟",
 };
 
+function snappedBoardWidthPx() {
+  const maxByViewport = Math.min(window.innerWidth * 0.94, 460);
+  const snapped = Math.floor((maxByViewport - 4) / 8) * 8;
+  return Math.max(244, snapped + 4);
+}
+
 /**
  * @param {string} piece
  */
@@ -57,6 +63,7 @@ export function createChessBoard(container, placements, options = {}) {
 
   const host = document.createElement("div");
   host.className = "chessboard-host";
+  host.style.width = `${snappedBoardWidthPx()}px`;
   container.appendChild(host);
 
   const chessboardFactory = window.ChessBoard ?? window.Chessboard;
@@ -81,6 +88,12 @@ export function createChessBoard(container, placements, options = {}) {
   /** @type {Map<string, HTMLButtonElement>} */
   const markCells = new Map();
   if (interactive) {
+    const boardSurface = /** @type {HTMLElement | null} */ (
+      host.querySelector(".board-b72b1")
+    );
+    const overlayRoot = boardSurface ?? host;
+    overlayRoot.style.position = "relative";
+
     const hitGrid = document.createElement("div");
     hitGrid.className = "chess-hit-grid";
 
@@ -95,7 +108,7 @@ export function createChessBoard(container, placements, options = {}) {
       markCells.set(sq, btn);
     }
 
-    host.appendChild(hitGrid);
+    overlayRoot.appendChild(hitGrid);
   }
 
   return {

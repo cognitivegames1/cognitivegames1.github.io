@@ -1,0 +1,19 @@
+{
+  "name": "Cognitive Games",
+  "short_name": "Cog Games",
+  "description": "Browser mini-games for memory, focus, and spatial reasoning. No account required.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#07090d",
+  "theme_color": "#07090d",
+  "lang": "en",
+  "icons": [
+    {
+      "src": "icons/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

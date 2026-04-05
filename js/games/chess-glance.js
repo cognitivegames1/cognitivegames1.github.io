@@ -1,44 +1,114 @@
-import { createChessBoard } from "../lib/chess-board.js";
+import { createChessBoard, pieceName } from "../lib/chess-board.js";
 import { randomPlacements } from "../lib/chess-position.js";
 import { pick, randInt } from "../lib/random.js";
+import { delay } from "../lib/async.js";
+import { createRoundRuntime } from "./shared/round-runtime.js";
+import { showSessionComplete } from "./shared/results.js";
 
-const WHITE = ["K", "Q", "R", "B", "N", "P"];
-const BLACK = ["k", "q", "r", "b", "n", "p"];
+const EXTRA_PIECE_LIMITS = {
+  K: 1,
+  Q: 1,
+  R: 2,
+  B: 2,
+  N: 2,
+  P: 8,
+  k: 1,
+  q: 1,
+  r: 2,
+  b: 2,
+  n: 2,
+  p: 8,
+};
 
-function randomPiece() {
-  return Math.random() < 0.5 ? pick(WHITE) : pick(BLACK);
+function randomPiece(placements) {
+  const counts = new Map();
+  for (const piece of Object.values(placements)) {
+    counts.set(piece, (counts.get(piece) ?? 0) + 1);
+  }
+
+  const choices = Object.entries(EXTRA_PIECE_LIMITS)
+    .filter(([piece, limit]) => (counts.get(piece) ?? 0) < limit)
+    .map(([piece]) => piece);
+
+  if (choices.length === 0) return null;
+  return pick(choices);
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
+function allSquares() {
+  return [...Array(64)].map((_, i) => {
+    const files = "abcdefgh";
+    const file = i % 8;
+    const rank = Math.floor(i / 8);
+    return `${files[file]}${rank + 1}`;
+  });
+}
+
+function buildBoardChange(placements) {
+  const occupied = Object.keys(placements);
+  const empty = allSquares().filter((sq) => !(sq in placements));
+  const removable = occupied.filter((sq) => placements[sq] !== "K" && placements[sq] !== "k");
+
+  /** @type {("add" | "remove" | "move")[]} */
+  const modes = [];
+  if (empty.length > 0 && randomPiece(placements)) modes.push("add");
+  if (removable.length > 0) modes.push("remove");
+  if (occupied.length > 0 && empty.length > 0) modes.push("move");
+  if (modes.length === 0) return null;
+
+  const mode = pick(modes);
+  /** @type {Record<string, string>} */
+  const nextPlacements = { ...placements };
+
+  if (mode === "add") {
+    const square = pick(empty);
+    const piece = randomPiece(nextPlacements);
+    if (!piece) return null;
+    nextPlacements[square] = piece;
+    return {
+      nextPlacements,
+      changedSquares: [square],
+      summary: `${pieceName(piece)} added on ${square.toUpperCase()}`,
+    };
+  }
+
+  if (mode === "remove") {
+    const square = pick(removable);
+    const piece = nextPlacements[square];
+    delete nextPlacements[square];
+    return {
+      nextPlacements,
+      changedSquares: [square],
+      summary: `${pieceName(piece)} removed from ${square.toUpperCase()}`,
+    };
+  }
+
+  const source = pick(occupied);
+  const destination = pick(empty);
+  const piece = nextPlacements[source];
+  delete nextPlacements[source];
+  nextPlacements[destination] = piece;
+  return {
+    nextPlacements,
+    changedSquares: [source, destination],
+    summary: `${pieceName(piece)} moved from ${source.toUpperCase()} to ${destination.toUpperCase()}`,
+  };
 }
 
 export const instructionsHtml = `
   <strong>Chess Glance</strong> — Study the board briefly. It disappears, then a new board appears with
-  <em>one extra piece</em>. Tap the square where that new piece sits.`;
+  one board change: a piece may be added, removed, or moved. Tap every square involved in the change.`;
 
 /**
  * @param {HTMLElement} root
  * @param {import('../play-shell.js').GameShell} shell
  */
 export function mount(root, shell) {
-  let alive = true;
-
-  function teardown() {
-    alive = false;
-    root.innerHTML = "";
-  }
-
-  function reset() {
-    teardown();
-    shell.stopTimer();
-    shell.resetTimerDisplay();
-  }
+  const runtime = createRoundRuntime(root, shell);
+  const teardown = runtime.teardown;
+  const reset = runtime.reset;
 
   async function beginRound() {
-    alive = true;
-    shell.hideResult();
-    root.innerHTML = "";
+    const myRound = runtime.beginRound();
 
     const difficulty = shell.getDifficulty();
     const memorizeMs = randInt(
@@ -49,16 +119,11 @@ export function mount(root, shell) {
     const maxPieces = Math.min(minPieces + 3, 16);
 
     const placements1 = randomPlacements(minPieces, maxPieces);
-    const occupied = new Set(Object.keys(placements1));
-    const allSq = [...Array(64)].map((_, i) => {
-      const files = "abcdefgh";
-      const file = i % 8;
-      const rank = Math.floor(i / 8);
-      return `${files[file]}${rank + 1}`;
-    });
-    const empty = allSq.filter((s) => !occupied.has(s));
-    const newSquare = pick(empty);
-    const placements2 = { ...placements1, [newSquare]: randomPiece() };
+    const change = buildBoardChange(placements1);
+    if (!change) return;
+    const placements2 = change.nextPlacements;
+    const changedSquares = change.changedSquares;
+    const questionCount = changedSquares.length;
 
     const phase = document.createElement("p");
     phase.className = "phase-label";
@@ -69,8 +134,8 @@ export function mount(root, shell) {
     root.appendChild(wrap1);
     createChessBoard(wrap1, placements1, { interactive: false });
 
-    await sleep(memorizeMs);
-    if (!alive) return;
+    await delay(memorizeMs);
+    if (!runtime.isActive(myRound)) return;
 
     wrap1.remove();
 
@@ -79,46 +144,63 @@ export function mount(root, shell) {
     const clearWrap = document.createElement("div");
     root.appendChild(clearWrap);
     createChessBoard(clearWrap, {}, { interactive: false });
-    await sleep(1000);
-    if (!alive) return;
+    await delay(1000);
+    if (!runtime.isActive(myRound)) return;
     clearWrap.remove();
 
-    phase.innerHTML = "Which square has the <strong>new</strong> piece?";
+    phase.innerHTML = `Find the changed square${questionCount === 1 ? "" : "s"}.`;
 
     const wrap2 = document.createElement("div");
     root.appendChild(wrap2);
 
-    let answered = false;
+    const found = new Set();
+    let attempts = 0;
+    const attemptLimit = questionCount + 2;
 
     const board = createChessBoard(wrap2, placements2, {
       interactive: true,
       onCellClick: (sq) => {
-        if (answered) return;
-        answered = true;
-        const correct = sq === newSquare;
+        if (!runtime.isActive(myRound)) return;
+        if (attempts >= attemptLimit || found.size >= questionCount) return;
+        attempts += 1;
+        const correct = changedSquares.includes(sq) && !found.has(sq);
+        if (correct) found.add(sq);
+
         board.clearMarks();
-        board.setHighlight(newSquare, "mark-correct");
+        for (const s of found) board.setHighlight(s, "mark-correct");
         if (!correct) board.setHighlight(sq, "mark-wrong");
 
-        const base = 100;
-        const bonus = correct ? Math.max(0, 40 - Math.floor(memorizeMs / 200)) : 0;
-        const pts = correct ? base + bonus : 0;
-        const progress = shell.recordRound(correct, pts);
+        phase.innerHTML = `Found ${found.size}/${questionCount} new square${questionCount === 1 ? "" : "s"}. Attempts ${attempts}/${attemptLimit}.`;
+        if (found.size < questionCount && attempts < attemptLimit) return;
+
+        board.clearMarks();
+        for (const s of changedSquares) board.setHighlight(s, "mark-correct");
+        if (!correct) board.setHighlight(sq, "mark-wrong");
+
+        const qualityFraction = questionCount > 0 ? found.size / questionCount : 0;
+        const success = found.size === questionCount;
+        const attemptFactor = (attemptLimit - attempts + 1) / attemptLimit;
+        const pts = success
+          ? Math.round((100 + difficulty * 14) * (0.58 + 0.42 * attemptFactor))
+          : 0;
+        const progress = shell.recordRound(success, pts, {
+          qualityFraction,
+          metrics: {
+            chessGlanceTargets: questionCount,
+            chessGlanceFound: found.size,
+            chessGlanceAttempts: attempts,
+          },
+        });
 
         shell.stopTimer();
         if (progress.done) {
-          shell.showResult(
-            "Session complete.",
-            `Performance: ${progress.rating}/100. Wins: ${progress.wins}/${progress.totalRounds}. Total points: ${shell.getScore()}.`,
-          );
+          showSessionComplete(shell, progress);
           return;
         }
 
         shell.showResult(
-          correct ? "Nice eye." : "Not quite.",
-          `${correct
-            ? `+${pts} points. The new piece was on ${newSquare.toUpperCase()}.`
-            : `The new piece was on ${newSquare.toUpperCase()}.`} Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
+          success ? "Board changes tracked." : "Some changes missed.",
+          `${success ? `+${pts} points. ` : ""}Found ${found.size}/${questionCount}. Change: ${change.summary}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
         );
       },
     });

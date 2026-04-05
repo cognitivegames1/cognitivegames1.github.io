@@ -1,14 +1,30 @@
-import { CATEGORIES, gamesInCategory } from "./games-data.js";
+import { RESEARCH_DISCLAIMER } from "./cognitive-constructs.js";
+import { CATEGORIES, gamesForFilter } from "./games-data.js";
+import { requireEl } from "./lib/dom.js";
 import "./posthog.js";
 
-const filterRoot = document.getElementById("filter-chips");
-const sectionsRoot = document.getElementById("category-sections");
+const researchDisclaimerEl = document.getElementById("research-disclaimer");
+if (researchDisclaimerEl) {
+  researchDisclaimerEl.textContent = RESEARCH_DISCLAIMER;
+}
+
+const filterRoot = requireEl("filter-chips");
+const gamesRoot = requireEl("games-stage");
+const deckCopy = requireEl("deck-copy");
+const heroGameCount = requireEl("hero-game-count");
+const heroCategoryCount = requireEl("hero-category-count");
+const categoryLabel = new Map(CATEGORIES.map((item) => [item.id, item.label]));
 
 /** @type {'all' | import('./games-data.js').CategoryId} */
 let activeFilter = "all";
+function labelForFilter() {
+  if (activeFilter === "all") return "all tracks";
+  return categoryLabel.get(activeFilter) ?? "selected track";
+}
 
 function renderChips() {
   filterRoot.innerHTML = "";
+
   const all = document.createElement("button");
   all.type = "button";
   all.className = "chip";
@@ -17,107 +33,127 @@ function renderChips() {
   all.addEventListener("click", () => setFilter("all"));
   filterRoot.appendChild(all);
 
-  for (const c of CATEGORIES) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "chip";
-    b.textContent = c.label;
-    b.setAttribute("aria-pressed", activeFilter === c.id ? "true" : "false");
-    b.addEventListener("click", () => setFilter(c.id));
-    filterRoot.appendChild(b);
+  for (const category of CATEGORIES) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.textContent = category.label;
+    chip.setAttribute("aria-pressed", activeFilter === category.id ? "true" : "false");
+    chip.addEventListener("click", () => setFilter(category.id));
+    filterRoot.appendChild(chip);
   }
 }
 
 /**
- * @param {'all' | import('./games-data.js').CategoryId} f
+ * @param {'all' | import('./games-data.js').CategoryId} next
  */
-function setFilter(f) {
-  activeFilter = f;
+function setFilter(next) {
+  activeFilter = next;
   renderChips();
-  renderSections();
+  renderDeck();
 }
 
-function renderSections() {
-  sectionsRoot.innerHTML = "";
+function makeMetaTag(text, accent = false) {
+  const tag = document.createElement("span");
+  tag.className = `rail-meta-tag${accent ? " accent" : ""}`;
+  tag.textContent = text;
+  return tag;
+}
 
-  const cats =
-    activeFilter === "all"
-      ? CATEGORIES.map((c) => c.id)
-      : [activeFilter];
+function makeRailCard(game, index) {
+  const card = document.createElement("article");
+  card.className = "rail-card";
+  card.style.setProperty("--card-accent", game.accent);
+  card.style.setProperty("--card-delay", `${Math.min(index * 42, 360)}ms`);
 
-  for (const catId of cats) {
-    const games = gamesInCategory(catId);
-    if (games.length === 0) continue;
+  const top = document.createElement("div");
+  top.className = "rail-top";
 
-    const cat = CATEGORIES.find((c) => c.id === catId);
-    const section = document.createElement("section");
-    section.className = "category-block";
-    section.id = `cat-${catId}`;
+  const icon = document.createElement("span");
+  icon.className = "rail-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = game.icon;
 
-    const h2 = document.createElement("h2");
-    h2.textContent = cat?.label ?? catId;
-    section.appendChild(h2);
+  const badges = document.createElement("div");
+  badges.className = "rail-badges";
+  badges.append(
+    makeMetaTag(categoryLabel.get(game.category) ?? game.category),
+    makeMetaTag(game.roundLength, true),
+  );
+  top.append(icon, badges);
 
-    const grid = document.createElement("div");
-    grid.className = "card-grid";
+  const title = document.createElement("h3");
+  title.className = "rail-title";
+  title.textContent = game.title;
 
-    for (const g of games) {
-      const card = document.createElement("article");
-      card.className = "game-card";
-      card.style.setProperty("--card-accent", g.accent);
+  const description = document.createElement("p");
+  description.className = "rail-description";
+  description.textContent = game.description;
 
-      const inner = document.createElement("div");
-      inner.className = "game-card-inner";
+  const foot = document.createElement("div");
+  foot.className = "rail-foot";
 
-      const icon = document.createElement("div");
-      icon.className = "icon";
-      icon.setAttribute("aria-hidden", "true");
-      icon.textContent = g.icon;
+  const difficulty = document.createElement("span");
+  difficulty.className = "rail-difficulty";
+  difficulty.textContent = game.difficulty;
 
-      const title = document.createElement("h3");
-      title.textContent = g.title;
+  const action = document.createElement("a");
+  action.className = "card-link";
+  action.href = `games/${encodeURIComponent(game.slug)}.html`;
+  action.textContent = "Play";
+  action.setAttribute("aria-label", `Play ${game.title}`);
+  action.title = `Play ${game.title}`;
 
-      const desc = document.createElement("p");
-      desc.textContent = g.description;
+  foot.append(difficulty, action);
+  card.append(top, title, description, foot);
+  return card;
+}
 
-      const meta = document.createElement("div");
-      meta.className = "meta-row";
+function makeGamesGrid(games) {
+  const track = document.createElement("div");
+  track.className = "rail-track";
+  track.setAttribute("role", "list");
 
-      const d = document.createElement("span");
-      d.className = "pill";
-      d.textContent = g.difficulty;
-
-      const len = document.createElement("span");
-      len.className = "pill accent";
-      len.style.setProperty("--card-accent", g.accent);
-      len.textContent = g.roundLength;
-
-      meta.append(d, len);
-
-      const link = document.createElement("a");
-      link.className = "cta";
-      link.href = `games/${encodeURIComponent(g.slug)}.html`;
-      link.textContent = "Play now →";
-
-      inner.append(icon, title, desc, meta, link);
-      card.appendChild(inner);
-      grid.appendChild(card);
-    }
-
-    section.appendChild(grid);
-    sectionsRoot.appendChild(section);
+  for (const [index, game] of games.entries()) {
+    const card = makeRailCard(game, index);
+    card.setAttribute("role", "listitem");
+    track.appendChild(card);
   }
 
-  if (sectionsRoot.childElementCount === 0) {
+  return track;
+}
+
+function gamesForActiveFilter() {
+  return [...gamesForFilter(activeFilter)].sort((left, right) => {
+    const leftCategory = categoryLabel.get(left.category) ?? left.category;
+    const rightCategory = categoryLabel.get(right.category) ?? right.category;
+    const byCategory = rightCategory.localeCompare(leftCategory);
+    if (byCategory !== 0) return byCategory;
+    return left.title.localeCompare(right.title);
+  });
+}
+
+function renderDeck() {
+  gamesRoot.innerHTML = "";
+  const games = gamesForActiveFilter();
+  const allGamesCount = gamesForFilter("all").length;
+  const activeCategoryCount = activeFilter === "all" ? CATEGORIES.length : 1;
+
+  heroGameCount.textContent = `${allGamesCount} game${allGamesCount === 1 ? "" : "s"}`;
+  heroCategoryCount.textContent = `${activeCategoryCount} categor${activeCategoryCount === 1 ? "y" : "ies"} active`;
+
+  if (games.length === 0) {
     const empty = document.createElement("p");
-    empty.className = "hero";
-    empty.style.paddingTop = "0.5rem";
-    empty.style.color = "var(--text-muted)";
-    empty.textContent =
-      "No games in this category yet. Try “All” or another bucket.";
-    sectionsRoot.appendChild(empty);
+    empty.className = "deck-empty";
+    empty.textContent = "No games in this track yet. Try another filter.";
+    gamesRoot.appendChild(empty);
+    deckCopy.textContent = "No games match the current filter.";
+    return;
   }
+
+  deckCopy.textContent = `Showing ${games.length} game${games.length === 1 ? "" : "s"} in ${labelForFilter()}, sorted by category.`;
+  gamesRoot.appendChild(makeGamesGrid(games));
 }
 
 renderChips();
-renderSections();
+renderDeck();

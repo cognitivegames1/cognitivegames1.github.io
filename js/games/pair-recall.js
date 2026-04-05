@@ -1,37 +1,25 @@
 import { pickN, shuffle } from "../lib/random.js";
+import { delay } from "../lib/async.js";
+import { createRoundRuntime } from "./shared/round-runtime.js";
+import { showSessionComplete } from "./shared/results.js";
 
 const SYMBOLS = ["🍎", "🍌", "🍒", "🍇", "⭐", "🌙", "☀️", "⚡", "🎵", "🎯", "🎲", "🔷"];
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 export const instructionsHtml = `
-  <strong>Pair Recall</strong> — Flip two cards at a time. Find every matching pair. One mismatch ends
-  the round; clearing the board wins.`;
+  <strong>Pair Recall</strong> — Flip two cards at a time and match pairs from memory.
+  Mismatches briefly reveal both cards, then they close again. Clear the board and finish in as few tries as possible.`;
 
 /**
  * @param {HTMLElement} root
  * @param {import('../play-shell.js').GameShell} shell
  */
 export function mount(root, shell) {
-  let alive = true;
-
-  function teardown() {
-    alive = false;
-    root.innerHTML = "";
-  }
-
-  function reset() {
-    teardown();
-    shell.stopTimer();
-    shell.resetTimerDisplay();
-  }
+  const runtime = createRoundRuntime(root, shell);
+  const teardown = runtime.teardown;
+  const reset = runtime.reset;
 
   async function beginRound() {
-    alive = true;
-    shell.hideResult();
-    root.innerHTML = "";
+    const myRound = runtime.beginRound();
 
     const difficulty = shell.getDifficulty();
     const pairCount = Math.min(8, 4 + Math.min(difficulty, 4));
@@ -41,7 +29,7 @@ export function mount(root, shell) {
     const cols = 4;
     const phase = document.createElement("p");
     phase.className = "phase-label";
-    phase.textContent = "Match every pair.";
+    phase.textContent = "Match every pair. Finish in as few tries as possible.";
     root.appendChild(phase);
 
     const grid = document.createElement("div");
@@ -60,104 +48,98 @@ export function mount(root, shell) {
       return { el: btn, sym, off: false };
     });
 
-    /** @type {number | null} */
-    let firstIdx = null;
-    let lock = false;
+    /** @type {number[]} */
+    let open = [];
     let matched = 0;
-    let inputLocked = false;
-
-    /**
-     * @param {number} idx
-     */
-    const pairIndexOf = (idx) => cards.findIndex(
-      (c, i) => i !== idx && c.sym === cards[idx].sym,
-    );
+    let attempts = 0;
+    let misses = 0;
+    let lock = false;
 
     const endWin = () => {
-      const pts = 90 + pairCount * 14 + difficulty * 10;
-      const progress = shell.recordRound(true, pts);
+      if (!runtime.isActive(myRound)) return;
+      const efficiency = attempts > 0 ? pairCount / attempts : 1;
+      const quality = Math.max(0, Math.min(1, efficiency));
+      const pts = Math.round((80 + pairCount * 12 + difficulty * 10) * (0.65 + 0.35 * quality));
+      const progress = shell.recordRound(true, pts, {
+        qualityFraction: quality,
+        metrics: { pairAttempts: attempts, pairMisses: misses, pairCount, pairMatched: matched },
+      });
       shell.stopTimer();
       if (progress.done) {
-        shell.showResult(
-          "Session complete.",
-          `Performance: ${progress.rating}/100. Wins: ${progress.wins}/${progress.totalRounds}. Total points: ${shell.getScore()}.`,
-        );
+        showSessionComplete(shell, progress);
         return;
       }
       shell.showResult(
         "All pairs found.",
-        `+${pts} points. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
+        `+${pts} points. Tries: ${attempts}, misses: ${misses}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
       );
     };
 
-    const endFail = () => {
-      inputLocked = true;
-      cards.forEach((c) => {
-        c.el.disabled = true;
-      });
-      const progress = shell.recordRound(false, 0);
-      shell.stopTimer();
-      if (progress.done) {
-        shell.showResult(
-          "Session complete.",
-          `Performance: ${progress.rating}/100. Wins: ${progress.wins}/${progress.totalRounds}. Total points: ${shell.getScore()}.`,
-        );
-        return;
-      }
-      shell.showResult(
-        "Mismatch.",
-        `Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
-      );
+    /**
+     * @param {number} idx
+     * @param {string[]} extraClasses
+     */
+    const revealFaceUp = (idx, extraClasses = []) => {
+      if (idx < 0 || idx >= cards.length) return;
+      const c = cards[idx];
+      c.el.textContent = c.sym;
+      c.el.classList.add("memory-up", ...extraClasses);
+    };
+
+    /**
+     * @param {number} idx
+     */
+    const hideFaceDown = (idx) => {
+      if (idx < 0 || idx >= cards.length) return;
+      const c = cards[idx];
+      if (c.off) return;
+      c.el.textContent = "?";
+      c.el.classList.remove("memory-up", "mark-wrong", "reveal-correct");
     };
 
     cards.forEach((card, i) => {
       card.el.addEventListener("click", async () => {
-        if (!alive || lock || card.off || inputLocked) return;
-        const faceUp = card.el.classList.contains("memory-up");
-        if (faceUp) return;
+        if (!runtime.isActive(myRound) || card.off || lock) return;
+        if (open.includes(i)) return;
 
-        card.el.textContent = card.sym;
-        card.el.classList.add("memory-up");
+        revealFaceUp(i);
+        open.push(i);
 
-        if (firstIdx === null) {
-          firstIdx = i;
-          return;
-        }
-
-        const j = firstIdx;
-        firstIdx = null;
-        if (j === i) return;
+        if (open.length < 2) return;
 
         lock = true;
+        attempts += 1;
+        const [leftIdx, rightIdx] = open;
+        const left = cards[leftIdx];
+        const right = cards[rightIdx];
 
-        if (cards[j].sym === card.sym) {
-          cards[j].off = true;
-          card.off = true;
-          cards[j].el.classList.add("memory-matched");
-          card.el.classList.add("memory-matched");
+        if (left.sym === right.sym) {
+          left.off = true;
+          right.off = true;
+          left.el.classList.add("memory-matched");
+          right.el.classList.add("memory-matched");
           matched++;
+          open = [];
+          phase.textContent = `Pairs ${matched}/${pairCount}. Tries: ${attempts}.`;
           lock = false;
           if (matched >= pairCount) endWin();
           return;
         }
 
-        cards[j].el.classList.add("mark-wrong");
-        card.el.classList.add("mark-wrong");
-        const pairOfFirst = pairIndexOf(j);
-        const pairOfSecond = pairIndexOf(i);
-        const reveals = [pairOfFirst, pairOfSecond];
+        misses++;
+        left.el.classList.add("mark-wrong");
+        right.el.classList.add("mark-wrong");
+        phase.textContent = `Miss ${misses}. Tries: ${attempts}.`;
+        await delay(520);
+        if (!runtime.isActive(myRound)) return;
 
-        for (const r of reveals) {
-          if (r < 0 || r === i || r === j) continue;
-          const rc = cards[r];
-          if (rc.off) continue;
-          rc.el.textContent = rc.sym;
-          rc.el.classList.add("memory-up", "reveal-correct");
-        }
-
-        await sleep(900);
-        if (!alive) return;
-        endFail();
+        left.el.classList.remove("mark-wrong");
+        right.el.classList.remove("mark-wrong");
+        hideFaceDown(leftIdx);
+        hideFaceDown(rightIdx);
+        open = [];
+        lock = false;
+        phase.textContent = `Pairs ${matched}/${pairCount}. Tries: ${attempts}.`;
       });
     });
   }

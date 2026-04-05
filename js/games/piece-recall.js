@@ -1,37 +1,25 @@
 import { createChessBoard, pieceGlyph, pieceName } from "../lib/chess-board.js";
 import { randomPlacements } from "../lib/chess-position.js";
-import { pick, randInt } from "../lib/random.js";
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+import { randInt, shuffle } from "../lib/random.js";
+import { delay } from "../lib/async.js";
+import { createRoundRuntime } from "./shared/round-runtime.js";
+import { showSessionComplete } from "./shared/results.js";
 
 export const instructionsHtml = `
   <strong>Piece Recall</strong> — Memorize the full position. When it vanishes, tap the square where the
-  highlighted piece <em>was</em>.`;
+  highlighted piece <em>was</em>. You answer multiple piece-location questions per board.`;
 
 /**
  * @param {HTMLElement} root
  * @param {import('../play-shell.js').GameShell} shell
  */
 export function mount(root, shell) {
-  let alive = true;
-
-  function teardown() {
-    alive = false;
-    root.innerHTML = "";
-  }
-
-  function reset() {
-    teardown();
-    shell.stopTimer();
-    shell.resetTimerDisplay();
-  }
+  const runtime = createRoundRuntime(root, shell);
+  const teardown = runtime.teardown;
+  const reset = runtime.reset;
 
   async function beginRound() {
-    alive = true;
-    shell.hideResult();
-    root.innerHTML = "";
+    const myRound = runtime.beginRound();
 
     const difficulty = shell.getDifficulty();
     const memorizeMs = randInt(
@@ -49,8 +37,19 @@ export function mount(root, shell) {
     }
     const uniquePool = entries.filter(([, p]) => counts.get(p) === 1);
     const pool = uniquePool.length > 0 ? uniquePool : entries;
-    const [targetSquare, targetPiece] = pick(pool);
-    const ask = pieceName(targetPiece);
+    const questionCount = Math.min(pool.length, difficulty >= 4 ? 3 : 2);
+    const questions = shuffle(pool).slice(0, questionCount);
+
+    /**
+     * @param {[string, string]} q
+     */
+    function askLabel(q) {
+      const [sq, piece] = q;
+      if ((counts.get(piece) ?? 0) > 1) {
+        return `${pieceName(piece)} on ${sq.toUpperCase()}`;
+      }
+      return pieceName(piece);
+    }
 
     const phase = document.createElement("p");
     phase.className = "phase-label";
@@ -61,49 +60,74 @@ export function mount(root, shell) {
     root.appendChild(wrap1);
     createChessBoard(wrap1, placements, { interactive: false });
 
-    await sleep(memorizeMs);
-    if (!alive) return;
+    await delay(memorizeMs);
+    if (!runtime.isActive(myRound)) return;
 
     wrap1.remove();
-    phase.innerHTML = `Where was <strong>${ask}</strong> <span aria-hidden="true" style="font-size:1.35rem">${pieceGlyph(targetPiece)}</span>?`;
 
     const wrap2 = document.createElement("div");
     root.appendChild(wrap2);
 
-    let answered = false;
+    let qIdx = 0;
+    let correctCount = 0;
+    let lock = false;
+
+    const renderQuestion = () => {
+      const [targetSquare, targetPiece] = questions[qIdx];
+      phase.innerHTML = `Q${qIdx + 1}/${questionCount}: Where was <strong>${askLabel([targetSquare, targetPiece])}</strong> <span aria-hidden="true" style="font-size:1.35rem">${pieceGlyph(targetPiece)}</span>?`;
+    };
 
     const board = createChessBoard(wrap2, {}, {
       interactive: true,
-      onCellClick: (sq) => {
-        if (answered) return;
-        answered = true;
+      onCellClick: async (sq) => {
+        if (lock || !runtime.isActive(myRound)) return;
+        lock = true;
+        const [targetSquare] = questions[qIdx];
         const correct = sq === targetSquare;
+        if (correct) correctCount += 1;
         board.clearMarks();
         board.setHighlight(targetSquare, "mark-correct");
         if (!correct) board.setHighlight(sq, "mark-wrong");
 
-        const base = 120;
-        const bonus = correct ? Math.max(0, 50 - Math.floor(memorizeMs / 250)) : 0;
-        const pts = correct ? base + bonus : 0;
-        const progress = shell.recordRound(correct, pts);
+        await delay(280);
+        if (!runtime.isActive(myRound)) return;
+        board.clearMarks();
+
+        qIdx += 1;
+        if (qIdx < questionCount) {
+          renderQuestion();
+          lock = false;
+          return;
+        }
+
+        const qualityFraction = questionCount > 0 ? correctCount / questionCount : 0;
+        const success = qualityFraction >= 0.67;
+        const speedBonus = Math.max(0, 60 - Math.floor(memorizeMs / 220));
+        const pts = success
+          ? Math.round((120 + difficulty * 14 + speedBonus) * (0.55 + 0.45 * qualityFraction))
+          : 0;
+        const progress = shell.recordRound(success, pts, {
+          qualityFraction,
+          metrics: {
+            pieceRecallQuestions: questionCount,
+            pieceRecallCorrect: correctCount,
+          },
+        });
 
         shell.stopTimer();
         if (progress.done) {
-          shell.showResult(
-            "Session complete.",
-            `Performance: ${progress.rating}/100. Wins: ${progress.wins}/${progress.totalRounds}. Total points: ${shell.getScore()}.`,
-          );
+          showSessionComplete(shell, progress);
           return;
         }
 
         shell.showResult(
-          correct ? "Locked in." : "Miss.",
-          `${correct
-            ? `+${pts} points. Correct square: ${targetSquare.toUpperCase()}.`
-            : `It was on ${targetSquare.toUpperCase()}.`} Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
+          success ? "Positions tracked." : "Some positions slipped.",
+          `${success ? `+${pts} points. ` : ""}Correct ${correctCount}/${questionCount}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
         );
       },
     });
+
+    renderQuestion();
   }
 
   return {

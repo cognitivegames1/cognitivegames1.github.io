@@ -15,10 +15,13 @@ export function createTileGrid(container, size, options = {}) {
 
   const n = size * size;
   for (let i = 0; i < n; i++) {
+    const row = Math.floor(i / size) + 1;
+    const col = (i % size) + 1;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "tile";
     btn.dataset.index = String(i);
+    btn.setAttribute("aria-label", `Grid tile row ${row}, column ${col}`);
     btn.disabled = !interactive;
     if (interactive) {
       btn.classList.add("interactive");

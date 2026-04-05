@@ -9,7 +9,7 @@
  * @property {(delta: number) => void} addScore
  * @property {() => number} getScore
  * @property {() => number} getDifficulty
- * @property {(success: boolean, points?: number) => {
+ * @property {(success: boolean, points?: number, opts?: { qualityFraction?: number, metrics?: Record<string, number | string | boolean | null> }) => {
  *   round: number,
  *   totalRounds: number,
  *   nextDifficulty: number,
@@ -24,6 +24,7 @@
  * @property {() => void} hideResult
  * @property {() => void} hideInstructions
  * @property {() => void} showInstructions
+ * @property {{ round: number, difficulty: number, wins: number, totalRounds: number, rating: number, finished: boolean }} session
  */
 
 export {};

@@ -1,9 +1,8 @@
 import { createTileGrid } from "../lib/tile-grid.js";
 import { pick, randInt } from "../lib/random.js";
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+import { delay } from "../lib/async.js";
+import { createRoundRuntime } from "./shared/round-runtime.js";
+import { showSessionComplete } from "./shared/results.js";
 
 /**
  * @param {number} idx
@@ -41,30 +40,20 @@ function randomPath(size, len) {
 }
 
 export const instructionsHtml = `
-  <strong>Path Memory</strong> — A path lights up along adjacent cells. Watch, then tap the same route in order.`;
+  <strong>Path Memory</strong> — A path lights up along adjacent cells. Watch, then tap the same route in order.
+  Wrong taps rewind one step, so you need to recover from memory slips.`;
 
 /**
  * @param {HTMLElement} root
  * @param {import('../play-shell.js').GameShell} shell
  */
 export function mount(root, shell) {
-  let alive = true;
-
-  function teardown() {
-    alive = false;
-    root.innerHTML = "";
-  }
-
-  function reset() {
-    teardown();
-    shell.stopTimer();
-    shell.resetTimerDisplay();
-  }
+  const runtime = createRoundRuntime(root, shell);
+  const teardown = runtime.teardown;
+  const reset = runtime.reset;
 
   async function beginRound() {
-    alive = true;
-    shell.hideResult();
-    root.innerHTML = "";
+    const myRound = runtime.beginRound();
 
     const difficulty = shell.getDifficulty();
     const size = difficulty <= 2 ? 4 : difficulty <= 4 ? 5 : 6;
@@ -74,7 +63,15 @@ export function mount(root, shell) {
     for (let t = 0; t < 40 && !path; t++) {
       path = randomPath(size, pathLen);
     }
-    if (!path) path = [0, 1, 2];
+    if (!path) {
+      for (let len = pathLen - 1; len >= 3 && !path; len--) {
+        for (let t = 0; t < 40 && !path; t++) {
+          path = randomPath(size, len);
+        }
+      }
+    }
+    if (!path) path = randomPath(size, 3);
+    if (!path) return;
 
     const onMs = Math.max(200, 420 - difficulty * 45);
     const offMs = Math.max(100, 200 - difficulty * 18);
@@ -90,14 +87,15 @@ export function mount(root, shell) {
     const { tiles } = createTileGrid(wrap, size, { interactive: false });
 
     for (const idx of path) {
-      if (!alive) return;
+      if (!runtime.isActive(myRound)) return;
       tiles[idx].classList.add("highlight", "flash");
-      await sleep(onMs);
+      await delay(onMs);
+      if (!runtime.isActive(myRound)) return;
       tiles[idx].classList.remove("highlight", "flash");
-      await sleep(offMs);
+      await delay(offMs);
     }
 
-    if (!alive) return;
+    if (!runtime.isActive(myRound)) return;
 
     phase.textContent = "Retrace the path on the grid.";
 
@@ -108,56 +106,67 @@ export function mount(root, shell) {
 
     let step = 0;
     let done = false;
+    let resolving = false;
+    let mistakes = 0;
+    let totalTaps = 0;
+    let correctTaps = 0;
 
     const onClick = async (i) => {
-      if (done) return;
+      if (done || resolving || !runtime.isActive(myRound)) return;
+      resolving = true;
+      totalTaps += 1;
       const expected = path[step];
       const pressed = tiles[i];
       pressed.classList.add("flash");
       window.setTimeout(() => pressed.classList.remove("flash"), 160);
 
       if (i !== expected) {
-        done = true;
+        mistakes += 1;
         pressed.classList.add("mark-wrong");
         tiles[expected].classList.add("highlight");
-        for (const t of tiles) t.disabled = true;
-        await sleep(280);
-        const progress = shell.recordRound(false, 0);
-        shell.stopTimer();
-        if (progress.done) {
-          shell.showResult(
-            "Session complete.",
-            `Performance: ${progress.rating}/100. Wins: ${progress.wins}/${progress.totalRounds}. Total points: ${shell.getScore()}.`,
-          );
-          return;
+        await delay(260);
+        if (!runtime.isActive(myRound)) return;
+        pressed.classList.remove("mark-wrong");
+        tiles[expected].classList.remove("highlight");
+        if (step > 0) {
+          step -= 1;
+          tiles[path[step]].classList.remove("selected");
         }
-        shell.showResult(
-          "Path broken.",
-          `Next cell was position ${expected + 1}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
-        );
+        phase.textContent = `Slip — rewind to step ${step + 1}/${path.length}.`;
+        resolving = false;
         return;
       }
 
+      correctTaps += 1;
       pressed.classList.add("selected");
       step++;
       if (step >= path.length) {
         done = true;
         for (const t of tiles) t.disabled = true;
-        const pts = 75 + pathLen * 10 + difficulty * 8;
-        const progress = shell.recordRound(true, pts);
+        const quality = totalTaps > 0 ? correctTaps / totalTaps : 0;
+        const success = quality >= 0.62;
+        const pts = success
+          ? Math.round((75 + pathLen * 10 + difficulty * 8) * (0.6 + 0.4 * quality))
+          : 0;
+        const progress = shell.recordRound(success, pts, {
+          qualityFraction: quality,
+          metrics: {
+            pathLength: path.length,
+            pathMistakes: mistakes,
+            pathTaps: totalTaps,
+          },
+        });
         shell.stopTimer();
         if (progress.done) {
-          shell.showResult(
-            "Session complete.",
-            `Performance: ${progress.rating}/100. Wins: ${progress.wins}/${progress.totalRounds}. Total points: ${shell.getScore()}.`,
-          );
+          showSessionComplete(shell, progress);
           return;
         }
         shell.showResult(
-          "Path locked in.",
-          `+${pts} points. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
+          success ? "Path recovered." : "Path unstable.",
+          `${success ? `+${pts} points. ` : ""}Mistakes: ${mistakes}, quality ${Math.round(quality * 100)}%. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
         );
       }
+      resolving = false;
     };
 
     for (let i = 0; i < tiles.length; i++) {

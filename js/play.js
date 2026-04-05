@@ -1,4 +1,13 @@
 import { GAMES } from "./games-data.js";
+import { constructsForGame, RESEARCH_DISCLAIMER } from "./cognitive-constructs.js";
+import { requireEl } from "./lib/dom.js";
+import { clamp } from "./lib/math.js";
+import {
+  clearCognitiveLocalStorage,
+  cognitiveStorageStats,
+  logRoundEvent,
+  recordSessionAndCompare,
+} from "./lib/cognitive-telemetry.js";
 import { createElapsedTimer, formatTime } from "./lib/timer.js";
 import "./posthog.js";
 
@@ -20,22 +29,23 @@ if (!meta) {
 }
 
 document.title = `${meta.title} - Cognitive Games`;
-document.getElementById("play-title").textContent = meta.title;
+
+requireEl("play-title").textContent = meta.title;
 document.documentElement.style.setProperty("--game-accent", meta.accent);
 
-const elTime = document.getElementById("stat-time");
-const elScore = document.getElementById("stat-score");
-const btnRestart = document.getElementById("btn-restart");
-const instructionsPanel = document.getElementById("instructions-panel");
-const instructionsText = document.getElementById("instructions-text");
-const btnStart = document.getElementById("btn-start-round");
-const gameRoot = document.getElementById("game-root");
-const resultPanel = document.getElementById("result-panel");
-const resultTitle = document.getElementById("result-title");
-const resultDetail = document.getElementById("result-detail");
-const btnPlayAgain = document.getElementById("btn-play-again");
+const elTime = requireEl("stat-time");
+const elScore = requireEl("stat-score");
+const btnRestart = requireEl("btn-restart");
+const instructionsPanel = requireEl("instructions-panel");
+const instructionsText = requireEl("instructions-text");
+const btnStart = requireEl("btn-start-round");
+const gameRoot = requireEl("game-root");
+const resultPanel = requireEl("result-panel");
+const resultTitle = requireEl("result-title");
+const resultDetail = requireEl("result-detail");
+const btnPlayAgain = requireEl("btn-play-again");
 
-const TOTAL_ROUNDS = 10;
+const TOTAL_ROUNDS = meta.sessionRounds ?? 10;
 const MIN_DIFFICULTY = 1;
 const MAX_DIFFICULTY = 5;
 
@@ -54,10 +64,6 @@ const timer = createElapsedTimer((sec) => {
   elTime.textContent = formatTime(sec);
 });
 
-function clamp(n, min, max) {
-  return Math.max(min, Math.min(max, n));
-}
-
 function updateScoreLabel() {
   elScore.textContent = `Score: ${totalScore}`;
 }
@@ -71,6 +77,9 @@ function addScore(delta) {
   setScore(totalScore + delta);
 }
 
+/** Reset after each full session summary is logged to avoid duplicate local history writes. */
+let sessionLogged = false;
+
 function resetSessionProgress() {
   session.round = 0;
   session.difficulty = MIN_DIFFICULTY;
@@ -79,11 +88,25 @@ function resetSessionProgress() {
   session.wins = 0;
   session.active = false;
   session.finished = false;
+  sessionLogged = false;
   updateScoreLabel();
 }
 
-function recordRound(success, points = 0) {
+/**
+ * @param {boolean} success
+ * @param {number} [points]
+ * @param {{ qualityFraction?: number, metrics?: Record<string, number | string | boolean | null> }} [opts]
+ * `qualityFraction` in [0,1] scales the difficulty-weighted contribution to the session rating (default: 1 if success else 0).
+ * `metrics` optional trial-level numbers for local analytics / PostHog.
+ */
+function recordRound(success, points = 0, opts = {}) {
   const levelUsed = session.difficulty;
+  let q = opts.qualityFraction;
+  if (typeof q !== "number" || Number.isNaN(q)) {
+    q = success ? 1 : 0;
+  } else {
+    q = clamp(q, 0, 1);
+  }
 
   if (session.finished) {
     const ratingNow = session.qualityMax > 0
@@ -102,10 +125,10 @@ function recordRound(success, points = 0) {
   session.active = true;
   session.round += 1;
   session.qualityMax += levelUsed;
+  session.qualityEarned += levelUsed * q;
 
   if (success) {
     session.wins += 1;
-    session.qualityEarned += levelUsed;
     if (points > 0) addScore(points);
   }
 
@@ -121,6 +144,15 @@ function recordRound(success, points = 0) {
     : 0;
   updateScoreLabel();
 
+  logRoundEvent(meta.slug, {
+    round: session.round,
+    difficulty: levelUsed,
+    success,
+    qualityFraction: q,
+    ratingAfter: rating,
+    metrics: opts.metrics,
+  });
+
   return {
     round: session.round,
     totalRounds: TOTAL_ROUNDS,
@@ -134,13 +166,125 @@ function recordRound(success, points = 0) {
 function showResult(title, detail) {
   timer.stop();
   resultTitle.textContent = title;
-  resultDetail.textContent = `${detail} Total score: ${totalScore}.`;
-  btnPlayAgain.textContent = session.finished ? "Start new 10-round session" : "Next round";
+  let tail = "";
+  if (session.finished && session.active && !sessionLogged) {
+    sessionLogged = true;
+    const rating = session.qualityMax > 0
+      ? Math.round((session.qualityEarned / session.qualityMax) * 100)
+      : 0;
+    const prior = recordSessionAndCompare(meta.slug, { rating, wins: session.wins });
+    if (prior && prior.priorCount > 0) {
+      tail = ` Versus your saved past sessions on this title: higher than ${prior.percentile}% of prior runs (${prior.priorCount} stored).`;
+    } else {
+      tail = " Baseline session stored locally for future comparisons on this title.";
+    }
+  }
+  resultDetail.textContent = `${detail}${tail} Total score: ${totalScore}.`;
+  btnPlayAgain.textContent = session.finished
+    ? (TOTAL_ROUNDS === 1 ? "Run again" : `Start new ${TOTAL_ROUNDS}-round session`)
+    : "Next round";
   resultPanel.classList.remove("hidden");
 }
 
 function hideResult() {
   resultPanel.classList.add("hidden");
+}
+
+function ensureConstructPanel() {
+  let el = document.getElementById("construct-panel");
+  if (el) return el;
+  const instructionsText = document.getElementById("instructions-text");
+  if (!instructionsText) return null;
+  el = document.createElement("div");
+  el.id = "construct-panel";
+  el.className = "construct-panel-wrap";
+  el.hidden = true;
+  instructionsText.insertAdjacentElement("afterend", el);
+  return el;
+}
+
+function renderConstructPanel() {
+  const constructPanel = ensureConstructPanel();
+  if (!constructPanel) return;
+  const list = constructsForGame(meta.slug);
+  if (list.length === 0) {
+    constructPanel.hidden = true;
+    constructPanel.innerHTML = "";
+    return;
+  }
+  constructPanel.hidden = false;
+  constructPanel.innerHTML = "";
+
+  const details = document.createElement("details");
+  details.className = "construct-disclosure";
+
+  const summary = document.createElement("summary");
+  summary.textContent = "What cognitive processes this relates to";
+
+  const disclaimer = document.createElement("p");
+  disclaimer.className = "construct-disclaimer";
+  disclaimer.textContent = RESEARCH_DISCLAIMER;
+
+  const ul = document.createElement("ul");
+  ul.className = "construct-list";
+
+  for (const c of list) {
+    const li = document.createElement("li");
+    const lead = document.createElement("strong");
+    lead.textContent = c.label;
+    li.append(lead, document.createTextNode(` — ${c.blurb} `));
+    const cite = document.createElement("cite");
+    cite.className = "construct-cite";
+    cite.textContent = c.cite;
+    li.appendChild(cite);
+    ul.appendChild(li);
+  }
+
+  details.append(summary, disclaimer, ul);
+  constructPanel.appendChild(details);
+}
+
+function renderTelemetryPrivacyRow() {
+  const instructionsPanel = document.getElementById("instructions-panel");
+  if (!instructionsPanel) return;
+  let el = document.getElementById("telemetry-privacy");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "telemetry-privacy";
+    el.className = "telemetry-privacy";
+    const actions = instructionsPanel.querySelector(".instructions-actions");
+    if (actions?.nextSibling) instructionsPanel.insertBefore(el, actions.nextSibling);
+    else instructionsPanel.appendChild(el);
+  }
+  el.innerHTML = "";
+  const stats = cognitiveStorageStats();
+  const details = document.createElement("details");
+  details.className = "telemetry-disclosure";
+  const summary = document.createElement("summary");
+  summary.textContent = "Data and privacy";
+  const p = document.createElement("p");
+  p.className = "telemetry-privacy-line";
+  p.textContent =
+    stats.sessionRows === 0
+      ? "No saved sessions yet — after you finish a 10-round run, future runs can compare to your history on this device."
+      : `Local history: ${stats.sessionRows} saved session${stats.sessionRows === 1 ? "" : "s"} across ${stats.gamesWithSessions} game${stats.gamesWithSessions === 1 ? "" : "s"} (this browser only).`;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn-ghost telemetry-clear-btn";
+  btn.textContent = "Clear local history";
+  btn.addEventListener("click", () => {
+    if (
+      !confirm(
+        "Remove all locally saved sessions and round logs? “Versus your past runs” will reset. This cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    clearCognitiveLocalStorage();
+    renderTelemetryPrivacyRow();
+  });
+  details.append(summary, p, btn);
+  el.append(details);
 }
 
 /** @type {null | { restart: () => void, reset: () => void, destroy: () => void }} */
@@ -164,19 +308,15 @@ function startNewSession() {
 
 async function loadGame() {
   const loaders = {
+    "cognitive-snapshot": () => import("./games/cognitive-snapshot.js"),
     "chess-glance": () => import("./games/chess-glance.js"),
     "piece-recall": () => import("./games/piece-recall.js"),
-    "sequence-echo": () => import("./games/sequence-echo.js"),
-    "pattern-grid": () => import("./games/pattern-grid.js"),
-    "n-back-grid": () => import("./games/n-back-grid.js"),
-    "icon-back": () => import("./games/icon-back.js"),
-    "reverse-echo": () => import("./games/reverse-echo.js"),
+    "sequence-echo": () => import("./games/sequence-echo.js?v=2026-04-05c"),
+    "pattern-grid": () => import("./games/pattern-grid.js?v=2026-04-05a"),
     "pair-recall": () => import("./games/pair-recall.js"),
     "path-memory": () => import("./games/path-memory.js"),
     "number-sweep": () => import("./games/number-sweep.js"),
     "color-word-clash": () => import("./games/color-word-clash.js"),
-    "reaction-gate": () => import("./games/reaction-gate.js"),
-    "target-count": () => import("./games/target-count.js"),
   };
 
   const load = loaders[/** @type {keyof typeof loaders} */ (meta.slug)];
@@ -187,6 +327,8 @@ async function loadGame() {
 
   const mod = await load();
   instructionsText.innerHTML = mod.instructionsHtml;
+  renderConstructPanel();
+  renderTelemetryPrivacyRow();
   gameRoot.innerHTML = "";
 
   setScore(0);
@@ -212,6 +354,18 @@ async function loadGame() {
     hideResult,
     hideInstructions: () => instructionsPanel.classList.add("hidden"),
     showInstructions: () => instructionsPanel.classList.remove("hidden"),
+    session: {
+      get round() { return session.round; },
+      get difficulty() { return session.difficulty; },
+      get wins() { return session.wins; },
+      get totalRounds() { return TOTAL_ROUNDS; },
+      get rating() {
+        return session.qualityMax > 0
+          ? Math.round((session.qualityEarned / session.qualityMax) * 100)
+          : 0;
+      },
+      get finished() { return session.finished; },
+    },
   });
 }
 

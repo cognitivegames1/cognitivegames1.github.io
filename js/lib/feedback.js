@@ -1,11 +1,7 @@
-export const FEEDBACK_REVEAL_MS = 320;
+import { delay } from "./async.js";
 
-/**
- * @param {number} ms
- */
-export function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+export const FEEDBACK_REVEAL_MS = 320;
+export { delay };
 
 /**
  * @param {Iterable<HTMLButtonElement>} controls

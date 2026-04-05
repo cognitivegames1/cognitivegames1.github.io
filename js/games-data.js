@@ -9,7 +9,8 @@
  *   difficulty: string,
  *   roundLength: string,
  *   accent: string,
- *   icon: string
+ *   icon: string,
+ *   sessionRounds?: number
  * }} GameMeta
  */
 
@@ -24,11 +25,23 @@ export const CATEGORIES = [
 /** @type {GameMeta[]} */
 export const GAMES = [
   {
+    slug: "cognitive-snapshot",
+    title: "Cognitive Snapshot",
+    category: "attention",
+    description:
+      "A 4-part combined check using memory, change detection, pair recall, and visual search.",
+    difficulty: "Guided",
+    roundLength: "~4–6 min",
+    accent: "#d97706",
+    icon: "◈",
+    sessionRounds: 1,
+  },
+  {
     slug: "chess-glance",
     title: "Chess Glance",
     category: "visual-memory",
     description:
-      "Memorize the board, then spot the one new piece that appears. Fast visual encoding.",
+      "Memorize the board, then detect one board change: a piece added, removed, or moved.",
     difficulty: "Medium",
     roundLength: "~45s",
     accent: "#f472b6",
@@ -50,7 +63,7 @@ export const GAMES = [
     title: "Pattern Grid",
     category: "visual-memory",
     description:
-      "Cells flash on briefly. Recreate the exact pattern from memory.",
+      "Cells flash briefly, then disappear. Tap only remembered cells; first mistake ends the round.",
     difficulty: "Easy–Hard",
     roundLength: "~30–60s",
     accent: "#38bdf8",
@@ -68,44 +81,11 @@ export const GAMES = [
     icon: "◇",
   },
   {
-    slug: "n-back-grid",
-    title: "N-Back Grid",
-    category: "working-memory",
-    description:
-      "Watch a tile stream, then identify the tile that repeated after N steps.",
-    difficulty: "Easy–Hard",
-    roundLength: "~40–90s",
-    accent: "#f59e0b",
-    icon: "⟲",
-  },
-  {
-    slug: "icon-back",
-    title: "Icon Match (1-Back)",
-    category: "working-memory",
-    description:
-      "Decide if the current icon matches the previous one. 10 fixed comparisons per round.",
-    difficulty: "Easy–Hard",
-    roundLength: "~25–50s",
-    accent: "#34d399",
-    icon: "◉",
-  },
-  {
-    slug: "reverse-echo",
-    title: "Reverse Echo",
-    category: "working-memory",
-    description:
-      "Watch a tile sequence, then replay it in reverse order.",
-    difficulty: "Easy–Hard",
-    roundLength: "~30–90s",
-    accent: "#fb7185",
-    icon: "↶",
-  },
-  {
     slug: "pair-recall",
     title: "Pair Recall",
     category: "visual-memory",
     description:
-      "Flip two cards at a time and find all matching pairs. One mismatch ends the round.",
+      "Flip two cards, remember positions, and clear the board in as few tries as possible.",
     difficulty: "Easy–Hard",
     roundLength: "~1–3 min",
     accent: "#c084fc",
@@ -127,7 +107,7 @@ export const GAMES = [
     title: "Number Sweep",
     category: "attention",
     description:
-      "Tap scattered numbers in ascending order as fast as you can. One wrong tap ends the round.",
+      "Tap scattered numbers in ascending order as fast as you can. Faster clears earn bonus points; one wrong tap ends the round.",
     difficulty: "Easy–Hard",
     roundLength: "~20–60s",
     accent: "#f472b6",
@@ -138,33 +118,11 @@ export const GAMES = [
     title: "Color–Word Clash",
     category: "attention",
     description:
-      "Stroop-style: pick the ink color of the word, not the word itself.",
+      "Stroop-style: pick the ink color, not the word — five quick trials per round.",
     difficulty: "Easy–Hard",
-    roundLength: "~30–60s",
+    roundLength: "~45–90s",
     accent: "#38bdf8",
     icon: "◐",
-  },
-  {
-    slug: "reaction-gate",
-    title: "Reaction Gate",
-    category: "attention",
-    description:
-      "Wait for green, then tap immediately. Early taps count as a false start.",
-    difficulty: "Easy–Hard",
-    roundLength: "~30–60s",
-    accent: "#a3e635",
-    icon: "⚡",
-  },
-  {
-    slug: "target-count",
-    title: "Target Count",
-    category: "attention",
-    description:
-      "Track one target tile through a rapid flash stream, then report how many times it appeared.",
-    difficulty: "Easy–Hard",
-    roundLength: "~30–70s",
-    accent: "#f97316",
-    icon: "◎",
   },
 ];
 

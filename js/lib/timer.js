@@ -11,6 +11,7 @@ export function createElapsedTimer(onTick) {
 
   return {
     start() {
+      if (id != null) window.clearInterval(id);
       start = performance.now();
       tick();
       id = window.setInterval(tick, 100);
