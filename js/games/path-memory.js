@@ -30,7 +30,7 @@ function randomPath(size, len) {
   const path = [cur];
   for (let i = 1; i < len; i++) {
     const opts = neighbors(cur, size).filter(
-      (x) => path.length < 2 || x !== path[path.length - 2],
+      (x) => !path.includes(x) && (path.length < 2 || x !== path[path.length - 2]),
     );
     if (opts.length === 0) return null;
     cur = pick(opts);
@@ -145,13 +145,14 @@ export function mount(root, shell) {
         for (const t of tiles) t.disabled = true;
         const quality = totalTaps > 0 ? correctTaps / totalTaps : 0;
         const success = quality >= 0.62;
+        const actualLength = path.length;
         const pts = success
-          ? Math.round((75 + pathLen * 10 + difficulty * 8) * (0.6 + 0.4 * quality))
+          ? Math.round((75 + actualLength * 10 + difficulty * 8) * (0.6 + 0.4 * quality))
           : 0;
         const progress = shell.recordRound(success, pts, {
           qualityFraction: quality,
           metrics: {
-            pathLength: path.length,
+            pathLength: actualLength,
             pathMistakes: mistakes,
             pathTaps: totalTaps,
           },

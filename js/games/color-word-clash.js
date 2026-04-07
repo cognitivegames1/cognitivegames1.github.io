@@ -13,12 +13,10 @@ const PALETTE = [
   { key: "orange", label: "Orange", hex: "#f97316" },
 ];
 
-const TRIALS_PER_ROUND = 5;
-const PASS_THRESHOLD = 4;
-
 export const instructionsHtml = `
   <strong>Color–Word Clash</strong> — Stroop trials: each time, a color word appears in <em>ink</em> of a different color.
-  Tap the swatch that matches the <strong>ink</strong>, not what the word says. ${TRIALS_PER_ROUND} trials per round.`;
+  Tap the swatch that matches the <strong>ink</strong>, not what the word says. Higher levels add more trials,
+  more competing colors, and less time to answer.`;
 
 /**
  * @param {HTMLElement} root
@@ -42,7 +40,13 @@ export function mount(root, shell) {
     pendingTrialResolve = null;
 
     const difficulty = shell.getDifficulty();
+    const trialCount = 5 + (difficulty >= 3 ? 1 : 0) + (difficulty >= 5 ? 1 : 0);
+    const choiceCount = Math.min(PALETTE.length, difficulty <= 2 ? 4 : difficulty === 3 ? 5 : 6);
+    const responseMs = Math.max(1800, 4600 - difficulty * 420);
+    const passThreshold = Math.ceil(trialCount * (difficulty >= 4 ? 0.8 : 0.75));
     let correct = 0;
+    let misses = 0;
+    let totalResponseMs = 0;
 
     const phase = document.createElement("p");
     phase.className = "phase-label";
@@ -56,9 +60,9 @@ export function mount(root, shell) {
     row.className = "stroop-choices";
     root.appendChild(row);
 
-    for (let t = 0; t < TRIALS_PER_ROUND; t++) {
+    for (let t = 0; t < trialCount; t++) {
       if (!isActive()) return;
-      phase.textContent = `Trial ${t + 1}/${TRIALS_PER_ROUND} — which ink color do you see?`;
+      phase.textContent = `Trial ${t + 1}/${trialCount} — match the ink color in ${Number((responseMs / 1000).toFixed(1))}s.`;
       row.innerHTML = "";
 
       const word = pick(PALETTE);
@@ -68,19 +72,37 @@ export function mount(root, shell) {
 
       const distractors = pickN(
         PALETTE.filter((c) => c.key !== ink.key),
-        3,
+        Math.max(0, choiceCount - 1),
       );
       const choices = shuffle([ink, ...distractors]);
+      const trialStart = performance.now();
 
       /** @type {Map<string, HTMLButtonElement>} */
       const swatchByKey = new Map();
 
       await new Promise((resolve) => {
+        const finishTrial = () => {
+          if (!pendingTrialResolve) return;
+          const done = pendingTrialResolve;
+          pendingTrialResolve = null;
+          done();
+        };
         pendingTrialResolve = () => {
           pendingTrialResolve = null;
           resolve();
         };
         let settled = false;
+        const timeoutId = window.setTimeout(async () => {
+          if (!isActive() || settled) return;
+          settled = true;
+          misses += 1;
+          totalResponseMs += responseMs;
+          disableControls(row.querySelectorAll("button"));
+          swatchByKey.get(ink.key)?.classList.add("mark-correct");
+          phase.textContent = `Too slow. Trial ${t + 1}/${trialCount}.`;
+          await delay(FEEDBACK_REVEAL_MS);
+          finishTrial();
+        }, responseMs);
         for (const c of choices) {
           const b = document.createElement("button");
           b.type = "button";
@@ -91,9 +113,12 @@ export function mount(root, shell) {
           b.addEventListener("click", async () => {
             if (!isActive() || settled) return;
             settled = true;
+            window.clearTimeout(timeoutId);
             disableControls(row.querySelectorAll("button"));
             const ok = c.key === ink.key;
+            totalResponseMs += performance.now() - trialStart;
             if (ok) correct += 1;
+            else misses += 1;
             const correctBtn = swatchByKey.get(ink.key);
             if (ok) {
               b.classList.add("mark-correct");
@@ -102,11 +127,7 @@ export function mount(root, shell) {
               correctBtn?.classList.add("mark-correct");
             }
             await delay(FEEDBACK_REVEAL_MS);
-            if (pendingTrialResolve) {
-              const done = pendingTrialResolve;
-              pendingTrialResolve = null;
-              done();
-            }
+            finishTrial();
           });
           row.appendChild(b);
         }
@@ -116,13 +137,15 @@ export function mount(root, shell) {
 
     if (!isActive()) return;
 
-    const success = correct >= PASS_THRESHOLD;
-    const acc = correct / TRIALS_PER_ROUND;
+    const success = correct >= passThreshold;
+    const acc = correct / trialCount;
+    const avgResponseMs = trialCount > 0 ? totalResponseMs / trialCount : responseMs;
+    const speedQuality = Math.max(0, Math.min(1, (responseMs - avgResponseMs) / Math.max(1, responseMs - 900)));
     const base = 85 + difficulty * 15;
-    const pts = success ? Math.round(base * (0.72 + 0.28 * acc)) : 0;
+    const pts = success ? Math.round(base * (0.62 + 0.23 * acc + 0.15 * speedQuality)) : 0;
     const progress = shell.recordRound(success, pts, {
-      qualityFraction: acc,
-      metrics: { trialsCorrect: correct, trialsTotal: TRIALS_PER_ROUND },
+      qualityFraction: Math.max(0, Math.min(1, 0.8 * acc + 0.2 * speedQuality)),
+      metrics: { trialsCorrect: correct, trialsTotal: trialCount, trialsMisses: misses, stroopChoiceCount: choiceCount, stroopResponseMs: responseMs, stroopAvgResponseMs: Math.round(avgResponseMs) },
     });
 
     shell.stopTimer();
@@ -133,7 +156,7 @@ export function mount(root, shell) {
 
     shell.showResult(
       success ? "Round clear." : "Too many slips.",
-      `${success ? `+${pts} points. ` : ""}Correct: ${correct}/${TRIALS_PER_ROUND}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
+      `${success ? `+${pts} points. ` : ""}Correct: ${correct}/${trialCount}. Misses: ${misses}. Avg response: ${Math.round(avgResponseMs)} ms. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
     );
   }
 

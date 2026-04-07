@@ -1,8 +1,10 @@
 import { createTileGrid } from "../lib/tile-grid.js";
-import { createChessBoard, pieceName } from "../lib/chess-board.js";
+import { createChessBoard } from "../lib/chess-board.js";
+import { buildBoardChange } from "../lib/chess-change.js";
+import { randomPlacements } from "../lib/chess-position.js";
 import { clamp } from "../lib/math.js";
 import { delay } from "../lib/async.js";
-import { pick, pickN, randInt, shuffle } from "../lib/random.js";
+import { pickN, shuffle } from "../lib/random.js";
 import { createRoundRuntime } from "./shared/round-runtime.js";
 
 const SNAPSHOT_SUBTESTS = [
@@ -57,77 +59,6 @@ const SNAPSHOT_SUBTESTS = [
 ];
 
 const PAIR_SYMBOLS = ["🍎", "🍌", "🍒", "🍇", "⭐", "🌙", "⚡", "🎵", "🎯", "🎲"];
-const EXTRA_PIECE_LIMITS = {
-  K: 1, Q: 1, R: 2, B: 2, N: 2, P: 8,
-  k: 1, q: 1, r: 2, b: 2, n: 2, p: 8,
-};
-
-function allSquares() {
-  return [...Array(64)].map((_, i) => {
-    const files = "abcdefgh";
-    const file = i % 8;
-    const rank = Math.floor(i / 8);
-    return `${files[file]}${rank + 1}`;
-  });
-}
-
-function randomPlacements(minPieces, maxPieces) {
-  const pieces = [
-    "K", "Q", "R", "R", "B", "B", "N", "N", "P", "P", "P", "P", "P", "P", "P", "P",
-    "k", "q", "r", "r", "b", "b", "n", "n", "p", "p", "p", "p", "p", "p", "p", "p",
-  ];
-  const count = randInt(minPieces, maxPieces);
-  const squares = pickN(allSquares(), count);
-  const chosen = pickN(pieces, count);
-  const out = {};
-  for (let i = 0; i < count; i++) out[squares[i]] = chosen[i];
-  return out;
-}
-
-function randomExtraPiece(placements) {
-  const counts = new Map();
-  for (const piece of Object.values(placements)) {
-    counts.set(piece, (counts.get(piece) ?? 0) + 1);
-  }
-  const available = Object.entries(EXTRA_PIECE_LIMITS)
-    .filter(([piece, limit]) => (counts.get(piece) ?? 0) < limit)
-    .map(([piece]) => piece);
-  return available.length > 0 ? pick(available) : null;
-}
-
-function buildBoardChange(placements, options = {}) {
-  const { singleSquareOnly = false, addOnly = false } = options;
-  const occupied = Object.keys(placements);
-  const empty = allSquares().filter((sq) => !(sq in placements));
-  const removable = occupied.filter((sq) => placements[sq] !== "K" && placements[sq] !== "k");
-  const modes = [];
-  if (empty.length > 0 && randomExtraPiece(placements)) modes.push("add");
-  if (!addOnly && removable.length > 0) modes.push("remove");
-  if (!addOnly && !singleSquareOnly && occupied.length > 0 && empty.length > 0) modes.push("move");
-  if (modes.length === 0) return null;
-
-  const nextPlacements = { ...placements };
-  const mode = pick(modes);
-  if (mode === "add") {
-    const square = pick(empty);
-    const piece = randomExtraPiece(nextPlacements);
-    if (!piece) return null;
-    nextPlacements[square] = piece;
-    return { nextPlacements, changedSquares: [square], summary: `${pieceName(piece)} added on ${square.toUpperCase()}` };
-  }
-  if (mode === "remove") {
-    const square = pick(removable);
-    const piece = nextPlacements[square];
-    delete nextPlacements[square];
-    return { nextPlacements, changedSquares: [square], summary: `${pieceName(piece)} removed from ${square.toUpperCase()}` };
-  }
-  const source = pick(occupied);
-  const destination = pick(empty);
-  const piece = nextPlacements[source];
-  delete nextPlacements[source];
-  nextPlacements[destination] = piece;
-  return { nextPlacements, changedSquares: [source, destination], summary: `${pieceName(piece)} moved from ${source.toUpperCase()} to ${destination.toUpperCase()}` };
-}
 
 function setInteractiveTiles(tiles, interactive) {
   for (const tile of tiles) {
@@ -148,12 +79,12 @@ function nextProfileIndex(currentIndex, score, maxIndex) {
 }
 
 function bandForComposite(composite) {
-  if (composite >= 85) return { label: "Exceptional", fitnessAge: 24 };
-  if (composite >= 72) return { label: "Strong", fitnessAge: 29 };
-  if (composite >= 58) return { label: "Solid", fitnessAge: 34 };
-  if (composite >= 45) return { label: "Developing", fitnessAge: 40 };
-  if (composite >= 32) return { label: "Uneven", fitnessAge: 47 };
-  return { label: "Early-stage", fitnessAge: 55 };
+  if (composite >= 85) return { label: "Exceptional" };
+  if (composite >= 72) return { label: "Strong" };
+  if (composite >= 58) return { label: "Solid" };
+  if (composite >= 45) return { label: "Developing" };
+  if (composite >= 32) return { label: "Uneven" };
+  return { label: "Early-stage" };
 }
 
 function stabilityForResults(results) {
@@ -195,7 +126,7 @@ export function mount(root, shell) {
     summary.className = "snapshot-summary";
     summary.textContent =
       `Composite score ${composite}/100. Band: ${band.label}. ` +
-      `Estimated cognitive fitness age: ${band.fitnessAge}. Stability: ${stability.label}.`;
+      `Stability: ${stability.label}.`;
 
     const grid = document.createElement("div");
     grid.className = "snapshot-grid";
@@ -222,7 +153,7 @@ export function mount(root, shell) {
     const note = document.createElement("p");
     note.className = "snapshot-note";
     note.textContent =
-      `Stability note: ${stability.detail}. This fitness age is heuristic from game performance on this device. ` +
+      `Stability note: ${stability.detail}. This profile is a heuristic summary from game performance on this device only. ` +
       "It is educational only, not clinical or normed.";
 
     wrap.append(heading, summary, grid, note);
@@ -301,7 +232,7 @@ export function mount(root, shell) {
       rootEl.innerHTML = "";
       const title = document.createElement("p");
       title.className = "phase-label";
-      title.textContent = `2/4 Chess Glance — level ${stageIndex + 1}/3. Find the changed squares.`;
+      title.textContent = `2/4 Chess Glance — level ${stageIndex + 1}/3. Find the new piece square.`;
       rootEl.appendChild(title);
 
       const placements1 = randomPlacements(stage.minPieces, stage.maxPieces);
@@ -515,7 +446,7 @@ export function mount(root, shell) {
               for (const button of buttons) button.disabled = true;
               await delay(220);
               const ms = performance.now() - t0;
-              const accuracy = next / count;
+              const accuracy = (next - 1) / count;
               const speed = clamp((9500 - ms) / 6500, 0, 1);
               const score = Math.round(100 * (0.7 * accuracy + 0.3 * speed));
               resolve({ score: clamp(score, 0, 100), detail: `L${stageIndex + 1}: stopped at ${next}/${count}, ${Math.round(ms)} ms` });
@@ -580,7 +511,7 @@ export function mount(root, shell) {
     shell.stopTimer();
     shell.showResult(
       "Snapshot complete.",
-      `Composite ${composite}/100. Band: ${band.label}. Fitness age estimate: ${band.fitnessAge}. Stability: ${stability.label}. ` +
+      `Composite ${composite}/100. Band: ${band.label}. Stability: ${stability.label}. ` +
       `Subscores: ${results.map((item) => `${item.label} ${item.score}`).join(" | ")}.`,
     );
   }
@@ -595,4 +526,4 @@ export function mount(root, shell) {
 export const instructionsHtml = `
   <strong>Cognitive Snapshot</strong> — Run four short checks built from the existing games:
   Pattern Grid, Chess Glance, Pair Recall, and Number Sweep. Each task runs for 3 adaptive levels,
-  then the normalized task scores are combined into one composite score, a banded result, and a heuristic fitness age estimate.`;
+  then the normalized task scores are combined into one composite score, a banded result, and a heuristic stability profile.`;

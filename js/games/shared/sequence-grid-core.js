@@ -1,5 +1,5 @@
 import { createTileGrid } from "../../lib/tile-grid.js";
-import { randInt } from "../../lib/random.js";
+import { randInt, shuffle } from "../../lib/random.js";
 import { delay } from "../../lib/async.js";
 import { createRoundRuntime } from "./round-runtime.js";
 import { showSessionComplete } from "./results.js";
@@ -45,9 +45,7 @@ export function mountGridSequenceGame(root, shell, opts) {
     const seqLen = randInt(seqMin, Math.max(seqMin, seqMax));
     const { onMs, offMs } = opts.timings(difficulty);
 
-    /** @type {number[]} */
-    const sequence = [];
-    for (let i = 0; i < seqLen; i++) sequence.push(randInt(0, n - 1));
+    const sequence = shuffle([...Array(n)].map((_, i) => i)).slice(0, seqLen);
     const expectedOrder = opts.expectedOrder(sequence);
 
     const phase = document.createElement("p");

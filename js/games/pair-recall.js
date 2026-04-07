@@ -54,13 +54,18 @@ export function mount(root, shell) {
     let attempts = 0;
     let misses = 0;
     let lock = false;
+    const maxAttempts = Math.max(pairCount + 2, Math.round(pairCount * 1.75));
 
     const endWin = () => {
       if (!runtime.isActive(myRound)) return;
       const efficiency = attempts > 0 ? pairCount / attempts : 1;
       const quality = Math.max(0, Math.min(1, efficiency));
-      const pts = Math.round((80 + pairCount * 12 + difficulty * 10) * (0.65 + 0.35 * quality));
-      const progress = shell.recordRound(true, pts, {
+      const successThreshold = difficulty >= 4 ? 0.72 : difficulty >= 2 ? 0.64 : 0.58;
+      const success = quality >= successThreshold;
+      const pts = success
+        ? Math.round((80 + pairCount * 12 + difficulty * 10) * (0.65 + 0.35 * quality))
+        : 0;
+      const progress = shell.recordRound(success, pts, {
         qualityFraction: quality,
         metrics: { pairAttempts: attempts, pairMisses: misses, pairCount, pairMatched: matched },
       });
@@ -70,8 +75,28 @@ export function mount(root, shell) {
         return;
       }
       shell.showResult(
-        "All pairs found.",
-        `+${pts} points. Tries: ${attempts}, misses: ${misses}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
+        success ? "All pairs found." : "Board cleared, but memory was too noisy.",
+        `${success ? `+${pts} points. ` : ""}Tries: ${attempts}, misses: ${misses}, efficiency ${Math.round(quality * 100)}%. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
+      );
+    };
+
+    const endFail = () => {
+      if (!runtime.isActive(myRound)) return;
+      const completion = pairCount > 0 ? matched / pairCount : 0;
+      const efficiency = attempts > 0 ? matched / attempts : 0;
+      const quality = Math.max(0, Math.min(1, 0.7 * completion + 0.3 * efficiency));
+      const progress = shell.recordRound(false, 0, {
+        qualityFraction: quality,
+        metrics: { pairAttempts: attempts, pairMisses: misses, pairCount, pairMatched: matched },
+      });
+      shell.stopTimer();
+      if (progress.done) {
+        showSessionComplete(shell, progress);
+        return;
+      }
+      shell.showResult(
+        "Memory budget exhausted.",
+        `Matched ${matched}/${pairCount}. Tries: ${attempts}/${maxAttempts}. Misses: ${misses}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
       );
     };
 
@@ -139,6 +164,11 @@ export function mount(root, shell) {
         hideFaceDown(rightIdx);
         open = [];
         lock = false;
+        if (attempts >= maxAttempts && matched < pairCount) {
+          for (const c of cards) c.el.disabled = true;
+          endFail();
+          return;
+        }
         phase.textContent = `Pairs ${matched}/${pairCount}. Tries: ${attempts}.`;
       });
     });

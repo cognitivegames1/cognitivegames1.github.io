@@ -129,8 +129,9 @@ export function mount(root, shell) {
     const failRound = async () => {
       disableControls(buttons);
       const ms = performance.now() - t0;
+      const progressFraction = count > 0 ? (next - 1) / count : 0;
       const progress = shell.recordRound(false, 0, {
-        qualityFraction: 0,
+        qualityFraction: progressFraction,
         metrics: {
           sweepMs: Math.round(ms),
           sweepRawMs: Math.round(ms),
@@ -145,7 +146,7 @@ export function mount(root, shell) {
       }
       shell.showResult(
         "Sweep broken.",
-        `Wrong tap on ${next}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
+        `Wrong tap on ${next}. Reached ${next - 1}/${count}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
       );
     };
 

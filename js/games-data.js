@@ -41,7 +41,7 @@ export const GAMES = [
     title: "Chess Glance",
     category: "visual-memory",
     description:
-      "Memorize the board, then detect one board change: a piece added, removed, or moved.",
+      "Memorize the board, then spot the one newly added piece.",
     difficulty: "Medium",
     roundLength: "~45s",
     accent: "#f472b6",

@@ -1,102 +1,14 @@
-import { createChessBoard, pieceName } from "../lib/chess-board.js";
+import { createChessBoard } from "../lib/chess-board.js";
+import { buildBoardChange } from "../lib/chess-change.js";
 import { randomPlacements } from "../lib/chess-position.js";
-import { pick, randInt } from "../lib/random.js";
+import { randInt } from "../lib/random.js";
 import { delay } from "../lib/async.js";
 import { createRoundRuntime } from "./shared/round-runtime.js";
 import { showSessionComplete } from "./shared/results.js";
 
-const EXTRA_PIECE_LIMITS = {
-  K: 1,
-  Q: 1,
-  R: 2,
-  B: 2,
-  N: 2,
-  P: 8,
-  k: 1,
-  q: 1,
-  r: 2,
-  b: 2,
-  n: 2,
-  p: 8,
-};
-
-function randomPiece(placements) {
-  const counts = new Map();
-  for (const piece of Object.values(placements)) {
-    counts.set(piece, (counts.get(piece) ?? 0) + 1);
-  }
-
-  const choices = Object.entries(EXTRA_PIECE_LIMITS)
-    .filter(([piece, limit]) => (counts.get(piece) ?? 0) < limit)
-    .map(([piece]) => piece);
-
-  if (choices.length === 0) return null;
-  return pick(choices);
-}
-
-function allSquares() {
-  return [...Array(64)].map((_, i) => {
-    const files = "abcdefgh";
-    const file = i % 8;
-    const rank = Math.floor(i / 8);
-    return `${files[file]}${rank + 1}`;
-  });
-}
-
-function buildBoardChange(placements) {
-  const occupied = Object.keys(placements);
-  const empty = allSquares().filter((sq) => !(sq in placements));
-  const removable = occupied.filter((sq) => placements[sq] !== "K" && placements[sq] !== "k");
-
-  /** @type {("add" | "remove" | "move")[]} */
-  const modes = [];
-  if (empty.length > 0 && randomPiece(placements)) modes.push("add");
-  if (removable.length > 0) modes.push("remove");
-  if (occupied.length > 0 && empty.length > 0) modes.push("move");
-  if (modes.length === 0) return null;
-
-  const mode = pick(modes);
-  /** @type {Record<string, string>} */
-  const nextPlacements = { ...placements };
-
-  if (mode === "add") {
-    const square = pick(empty);
-    const piece = randomPiece(nextPlacements);
-    if (!piece) return null;
-    nextPlacements[square] = piece;
-    return {
-      nextPlacements,
-      changedSquares: [square],
-      summary: `${pieceName(piece)} added on ${square.toUpperCase()}`,
-    };
-  }
-
-  if (mode === "remove") {
-    const square = pick(removable);
-    const piece = nextPlacements[square];
-    delete nextPlacements[square];
-    return {
-      nextPlacements,
-      changedSquares: [square],
-      summary: `${pieceName(piece)} removed from ${square.toUpperCase()}`,
-    };
-  }
-
-  const source = pick(occupied);
-  const destination = pick(empty);
-  const piece = nextPlacements[source];
-  delete nextPlacements[source];
-  nextPlacements[destination] = piece;
-  return {
-    nextPlacements,
-    changedSquares: [source, destination],
-    summary: `${pieceName(piece)} moved from ${source.toUpperCase()} to ${destination.toUpperCase()}`,
-  };
-}
-
 export const instructionsHtml = `
   <strong>Chess Glance</strong> — Study the board briefly. It disappears, then a new board appears with
-  one board change: a piece may be added, removed, or moved. Tap every square involved in the change.`;
+  one additional piece. Tap the square where the new piece appeared.`;
 
 /**
  * @param {HTMLElement} root
@@ -119,7 +31,10 @@ export function mount(root, shell) {
     const maxPieces = Math.min(minPieces + 3, 16);
 
     const placements1 = randomPlacements(minPieces, maxPieces);
-    const change = buildBoardChange(placements1);
+    const change = buildBoardChange(placements1, {
+      singleSquareOnly: true,
+      addOnly: true,
+    });
     if (!change) return;
     const placements2 = change.nextPlacements;
     const changedSquares = change.changedSquares;
