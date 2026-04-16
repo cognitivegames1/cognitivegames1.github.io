@@ -14,28 +14,16 @@
  * }} GameMeta
  */
 
-/** @type {{ id: CategoryId, label: string }[]} */
+/** @type {{ id: CategoryId, label: string, short: string }[]} */
 export const CATEGORIES = [
-  { id: "visual-memory", label: "Visual Memory" },
-  { id: "working-memory", label: "Working Memory" },
-  { id: "spatial", label: "Spatial Reasoning" },
-  { id: "attention", label: "Attention and Speed" },
+  { id: "visual-memory",  label: "Visual Memory",   short: "Visual" },
+  { id: "working-memory", label: "Working Memory",  short: "Working" },
+  { id: "spatial",        label: "Spatial Reasoning", short: "Spatial" },
+  { id: "attention",      label: "Attention & Speed", short: "Focus" },
 ];
 
 /** @type {GameMeta[]} */
 export const GAMES = [
-  {
-    slug: "cognitive-snapshot",
-    title: "Cognitive Snapshot",
-    category: "attention",
-    description:
-      "A 4-part combined check using memory, change detection, pair recall, and visual search.",
-    difficulty: "Guided",
-    roundLength: "~4–6 min",
-    accent: "#d97706",
-    icon: "◈",
-    sessionRounds: 1,
-  },
   {
     slug: "chess-glance",
     title: "Chess Glance",
@@ -118,7 +106,7 @@ export const GAMES = [
     title: "Color–Word Clash",
     category: "attention",
     description:
-      "Stroop-style: pick the ink color, not the word — five quick trials per round.",
+      "Stroop-style: pick the ink color, not the word — a few quick trials per round.",
     difficulty: "Easy–Hard",
     roundLength: "~45–90s",
     accent: "#38bdf8",
@@ -133,12 +121,4 @@ export const GAMES = [
 export function gamesForFilter(filter) {
   if (filter === "all") return GAMES;
   return GAMES.filter((g) => g.category === filter);
-}
-
-/**
- * @param {CategoryId} category
- * @returns {GameMeta[]}
- */
-export function gamesInCategory(category) {
-  return GAMES.filter((g) => g.category === category);
 }

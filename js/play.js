@@ -1,3 +1,4 @@
+import "./lib/analytics.js";
 import { GAMES } from "./games-data.js";
 import { constructsForGame, RESEARCH_DISCLAIMER } from "./cognitive-constructs.js";
 import { requireEl } from "./lib/dom.js";
@@ -9,7 +10,6 @@ import {
   recordSessionAndCompare,
 } from "./lib/cognitive-telemetry.js";
 import { createElapsedTimer, formatTime } from "./lib/timer.js";
-import "./posthog.js";
 
 const params = new URLSearchParams(window.location.search);
 const datasetSlug = document.documentElement.dataset.gameSlug?.trim() || null;
@@ -29,12 +29,24 @@ if (!meta) {
 }
 
 document.title = `${meta.title} - Cognitive Games`;
-
 requireEl("play-title").textContent = meta.title;
-document.documentElement.style.setProperty("--game-accent", meta.accent);
 
 const elTime = requireEl("stat-time");
 const elScore = requireEl("stat-score");
+const elRound = requireEl("stat-round");
+const statLine = /** @type {HTMLElement} */ (document.querySelector(".play-top .stat-line"));
+
+{
+  const liveWrap = document.createElement("span");
+  liveWrap.className = "stat-live";
+  while (statLine.firstChild) liveWrap.appendChild(statLine.firstChild);
+  const idle = document.createElement("span");
+  idle.className = "stat-idle";
+  idle.textContent = `${meta.sessionRounds ?? 10} rounds · adaptive`;
+  statLine.append(idle, liveWrap);
+  statLine.dataset.state = "idle";
+}
+function setStatState(state) { statLine.dataset.state = state; }
 const btnRestart = requireEl("btn-restart");
 const instructionsPanel = requireEl("instructions-panel");
 const instructionsText = requireEl("instructions-text");
@@ -44,6 +56,7 @@ const resultPanel = requireEl("result-panel");
 const resultTitle = requireEl("result-title");
 const resultDetail = requireEl("result-detail");
 const btnPlayAgain = requireEl("btn-play-again");
+const playMain = /** @type {HTMLElement} */ (document.querySelector(".play-main"));
 
 const TOTAL_ROUNDS = meta.sessionRounds ?? 10;
 const MIN_DIFFICULTY = 1;
@@ -60,24 +73,15 @@ const session = {
   finished: false,
 };
 
-const timer = createElapsedTimer((sec) => {
-  elTime.textContent = formatTime(sec);
-});
+const timer = createElapsedTimer((sec) => { elTime.textContent = formatTime(sec); });
 
-function updateScoreLabel() {
-  elScore.textContent = `Score: ${totalScore}`;
+function updateScoreLabel() { elScore.textContent = String(totalScore); }
+function updateRoundLabel() {
+  elRound.textContent = `${session.round}/${TOTAL_ROUNDS}`;
 }
+function setScore(n) { totalScore = n; updateScoreLabel(); }
+function addScore(delta) { setScore(totalScore + delta); }
 
-function setScore(n) {
-  totalScore = n;
-  updateScoreLabel();
-}
-
-function addScore(delta) {
-  setScore(totalScore + delta);
-}
-
-/** Reset after each full session summary is logged to avoid duplicate local history writes. */
 let sessionLogged = false;
 
 function resetSessionProgress() {
@@ -90,14 +94,13 @@ function resetSessionProgress() {
   session.finished = false;
   sessionLogged = false;
   updateScoreLabel();
+  updateRoundLabel();
 }
 
 /**
  * @param {boolean} success
  * @param {number} [points]
  * @param {{ qualityFraction?: number, metrics?: Record<string, number | string | boolean | null> }} [opts]
- * `qualityFraction` in [0,1] scales the difficulty-weighted contribution to the session rating (default: 1 if success else 0).
- * `metrics` optional trial-level numbers for local analytics / PostHog.
  */
 function recordRound(success, points = 0, opts = {}) {
   const levelUsed = session.difficulty;
@@ -143,6 +146,7 @@ function recordRound(success, points = 0, opts = {}) {
     ? Math.round((session.qualityEarned / session.qualityMax) * 100)
     : 0;
   updateScoreLabel();
+  updateRoundLabel();
 
   logRoundEvent(meta.slug, {
     round: session.round,
@@ -165,6 +169,7 @@ function recordRound(success, points = 0, opts = {}) {
 
 function showResult(title, detail) {
   timer.stop();
+  if (session.finished) setStatState("done");
   resultTitle.textContent = title;
   let tail = "";
   if (session.finished && session.active && !sessionLogged) {
@@ -174,117 +179,70 @@ function showResult(title, detail) {
       : 0;
     const prior = recordSessionAndCompare(meta.slug, { rating, wins: session.wins });
     if (prior && prior.priorCount > 0) {
-      tail = ` Versus your saved past sessions on this title: higher than ${prior.percentile}% of prior runs (${prior.priorCount} stored).`;
+      tail = ` Vs past runs on this device: higher than ${prior.percentile}% (${prior.priorCount} stored).`;
     } else {
-      tail = " Baseline session stored locally for future comparisons on this title.";
+      tail = " Baseline saved locally.";
     }
   }
-  resultDetail.textContent = `${detail}${tail} Total score: ${totalScore}.`;
+  resultDetail.textContent = `${detail}${tail} Total: ${totalScore}.`;
   btnPlayAgain.textContent = session.finished
-    ? (TOTAL_ROUNDS === 1 ? "Run again" : `Start new ${TOTAL_ROUNDS}-round session`)
+    ? (TOTAL_ROUNDS === 1 ? "Run again" : `New ${TOTAL_ROUNDS}-round session`)
     : "Next round";
   resultPanel.classList.remove("hidden");
 }
 
-function hideResult() {
-  resultPanel.classList.add("hidden");
-}
+function hideResult() { resultPanel.classList.add("hidden"); }
 
-function ensureConstructPanel() {
-  let el = document.getElementById("construct-panel");
-  if (el) return el;
-  const instructionsText = document.getElementById("instructions-text");
-  if (!instructionsText) return null;
-  el = document.createElement("div");
-  el.id = "construct-panel";
-  el.className = "construct-panel-wrap";
-  el.hidden = true;
-  instructionsText.insertAdjacentElement("afterend", el);
-  return el;
-}
-
-function renderConstructPanel() {
-  const constructPanel = ensureConstructPanel();
-  if (!constructPanel) return;
-  const list = constructsForGame(meta.slug);
-  if (list.length === 0) {
-    constructPanel.hidden = true;
-    constructPanel.innerHTML = "";
-    return;
-  }
-  constructPanel.hidden = false;
-  constructPanel.innerHTML = "";
-
-  const details = document.createElement("details");
-  details.className = "construct-disclosure";
-
-  const summary = document.createElement("summary");
-  summary.textContent = "What cognitive processes this relates to";
-
-  const disclaimer = document.createElement("p");
-  disclaimer.className = "construct-disclaimer";
-  disclaimer.textContent = RESEARCH_DISCLAIMER;
-
-  const ul = document.createElement("ul");
-  ul.className = "construct-list";
-
-  for (const c of list) {
-    const li = document.createElement("li");
-    const lead = document.createElement("strong");
-    lead.textContent = c.label;
-    li.append(lead, document.createTextNode(` — ${c.blurb} `));
-    const cite = document.createElement("cite");
-    cite.className = "construct-cite";
-    cite.textContent = c.cite;
-    li.appendChild(cite);
-    ul.appendChild(li);
+function renderFooterBlocks() {
+  for (const id of ["construct-block", "privacy-block"]) {
+    document.getElementById(id)?.remove();
   }
 
-  details.append(summary, disclaimer, ul);
-  constructPanel.appendChild(details);
-}
+  const constructs = constructsForGame(meta.slug);
+  if (constructs.length > 0) {
+    const block = document.createElement("details");
+    block.className = "details-block";
+    block.id = "construct-block";
+    block.innerHTML = `<summary>Cognitive constructs this targets</summary>`;
 
-function renderTelemetryPrivacyRow() {
-  const instructionsPanel = document.getElementById("instructions-panel");
-  if (!instructionsPanel) return;
-  let el = document.getElementById("telemetry-privacy");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "telemetry-privacy";
-    el.className = "telemetry-privacy";
-    const actions = instructionsPanel.querySelector(".instructions-actions");
-    if (actions?.nextSibling) instructionsPanel.insertBefore(el, actions.nextSibling);
-    else instructionsPanel.appendChild(el);
-  }
-  el.innerHTML = "";
-  const stats = cognitiveStorageStats();
-  const details = document.createElement("details");
-  details.className = "telemetry-disclosure";
-  const summary = document.createElement("summary");
-  summary.textContent = "Data and privacy";
-  const p = document.createElement("p");
-  p.className = "telemetry-privacy-line";
-  p.textContent =
-    stats.sessionRows === 0
-      ? "No saved sessions yet — after you finish a 10-round run, future runs can compare to your history on this device."
-      : `Local history: ${stats.sessionRows} saved session${stats.sessionRows === 1 ? "" : "s"} across ${stats.gamesWithSessions} game${stats.gamesWithSessions === 1 ? "" : "s"} (this browser only).`;
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "btn-ghost telemetry-clear-btn";
-  btn.textContent = "Clear local history";
-  btn.addEventListener("click", () => {
-    if (
-      !confirm(
-        "Remove all locally saved sessions and round logs? “Versus your past runs” will reset. This cannot be undone.",
-      )
-    ) {
-      return;
+    const disclaimer = document.createElement("p");
+    disclaimer.textContent = RESEARCH_DISCLAIMER;
+    block.appendChild(disclaimer);
+
+    const ul = document.createElement("ul");
+    for (const c of constructs) {
+      const li = document.createElement("li");
+      const lead = document.createElement("strong");
+      lead.textContent = c.label;
+      li.append(lead, document.createTextNode(` — ${c.blurb} `));
+      const cite = document.createElement("cite");
+      cite.textContent = c.cite;
+      li.appendChild(cite);
+      ul.appendChild(li);
     }
+    block.appendChild(ul);
+    playMain.appendChild(block);
+  }
+
+  const privacy = document.createElement("details");
+  privacy.className = "details-block";
+  privacy.id = "privacy-block";
+  const stats = cognitiveStorageStats();
+  const line = stats.sessionRows === 0
+    ? `No saved sessions yet. After you finish a ${TOTAL_ROUNDS}-round run, future runs can compare to your history on this device.`
+    : `Local history: ${stats.sessionRows} saved session${stats.sessionRows === 1 ? "" : "s"} across ${stats.gamesWithSessions} game${stats.gamesWithSessions === 1 ? "" : "s"} (this browser only).`;
+  privacy.innerHTML = `
+    <summary>Privacy & local data</summary>
+    <p>${line}</p>
+    <p class="hint">Anonymous pageviews are sent to PostHog (us.i.posthog.com). No account, no personal data.</p>
+    <button type="button" class="btn ghost small" data-clear>Clear local history</button>
+  `;
+  privacy.querySelector("[data-clear]")?.addEventListener("click", () => {
+    if (!confirm("Remove all locally saved sessions and round logs? This cannot be undone.")) return;
     clearCognitiveLocalStorage();
-    renderTelemetryPrivacyRow();
+    renderFooterBlocks();
   });
-  details.append(summary, p, btn);
-  el.append(details);
+  playMain.appendChild(privacy);
 }
 
 /** @type {null | { restart: () => void, reset: () => void, destroy: () => void }} */
@@ -293,6 +251,7 @@ let current = null;
 function startRoundNow() {
   hideResult();
   elTime.textContent = "0.00s";
+  setStatState("active");
   timer.stop();
   timer.start();
   current?.restart();
@@ -308,7 +267,6 @@ function startNewSession() {
 
 async function loadGame() {
   const loaders = {
-    "cognitive-snapshot": () => import("./games/cognitive-snapshot.js"),
     "chess-glance": () => import("./games/chess-glance.js"),
     "piece-recall": () => import("./games/piece-recall.js"),
     "sequence-echo": () => import("./games/sequence-echo.js?v=2026-04-05c"),
@@ -327,8 +285,7 @@ async function loadGame() {
 
   const mod = await load();
   instructionsText.innerHTML = mod.instructionsHtml;
-  renderConstructPanel();
-  renderTelemetryPrivacyRow();
+  renderFooterBlocks();
   gameRoot.innerHTML = "";
 
   setScore(0);
@@ -347,9 +304,7 @@ async function loadGame() {
     recordRound,
     startTimer: () => timer.start(),
     stopTimer: () => timer.stop(),
-    resetTimerDisplay: () => {
-      elTime.textContent = "0.00s";
-    },
+    resetTimerDisplay: () => { elTime.textContent = "0.00s"; },
     showResult,
     hideResult,
     hideInstructions: () => instructionsPanel.classList.add("hidden"),
@@ -369,17 +324,16 @@ async function loadGame() {
   });
 }
 
-btnStart.addEventListener("click", () => {
-  startNewSession();
-});
+btnStart.addEventListener("click", () => { startNewSession(); });
 
 btnRestart.addEventListener("click", () => {
   timer.stop();
   elTime.textContent = "0.00s";
   setScore(0);
   resetSessionProgress();
+  setStatState("idle");
   hideResult();
-  btnPlayAgain.textContent = "Play again";
+  btnPlayAgain.textContent = "Next round";
   instructionsPanel.classList.remove("hidden");
   current?.reset();
 });

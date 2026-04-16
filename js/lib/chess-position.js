@@ -7,7 +7,7 @@ const STARTING_PIECES = [
 ];
 const STARTING_PIECES_NO_KINGS = STARTING_PIECES.filter((p) => p !== "K" && p !== "k");
 
-function allSquares() {
+export function allSquares() {
   return [...Array(64)].map((_, i) => {
     const file = i % 8;
     const rank = Math.floor(i / 8);

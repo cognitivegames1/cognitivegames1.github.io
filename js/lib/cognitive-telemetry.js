@@ -1,11 +1,14 @@
 /**
- * Local session history + optional PostHog events. No server — "percentile" is vs your own past runs.
+ * Local-only session & round history. No server, no network.
+ * "Percentile" is computed against this device's own past runs.
  */
 
 const STORAGE_SESSIONS = "cg_cognitive_sessions_v1";
 const STORAGE_ROUNDS = "cg_cognitive_rounds_v1";
+const STORAGE_TESTS = "cg_cognitive_tests_v1";
 const MAX_SESSIONS_PER_GAME = 40;
 const MAX_ROUND_EVENTS = 400;
+const MAX_TESTS_PER_SLUG = 40;
 
 /**
  * @typedef {{
@@ -73,7 +76,7 @@ function writeRounds(/** @type {RoundRecord[]} */ rows) {
  * @param {number} rating
  * @returns {null | { percentile: number, priorCount: number }}
  */
-export function compareToOwnHistory(slug, rating) {
+function compareToOwnHistory(slug, rating) {
   const all = readSessions();
   const listRaw = all[slug];
   const list = Array.isArray(listRaw) ? listRaw : [];
@@ -104,7 +107,6 @@ export function recordSessionAndCompare(slug, summary) {
   });
   all[slug] = list.slice(-MAX_SESSIONS_PER_GAME);
   writeSessions(all);
-  logSessionComplete(slug, summary);
   return before;
 }
 
@@ -121,46 +123,49 @@ export function logRoundEvent(slug, payload) {
   const rounds = readRounds();
   rounds.push(row);
   writeRounds(rounds);
-
-  if (typeof window !== "undefined" && window.posthog?.capture) {
-    window.posthog.capture("cognitive_round", {
-      game_slug: slug,
-      round: payload.round,
-      difficulty: payload.difficulty,
-      success: payload.success,
-      quality_fraction: payload.qualityFraction,
-      rating_after: payload.ratingAfter,
-      ...flattenMetrics(payload.metrics),
-    });
-  }
 }
 
 /**
- * @param {Record<string, number | string | boolean | null> | undefined} m
+ * @typedef {{ slug: string, at: number, overall: number }} TestRecord
  */
-function flattenMetrics(m) {
-  if (!m || typeof m !== "object") return {};
-  /** @type {Record<string, string | number | boolean>} */
-  const out = {};
-  for (const [k, v] of Object.entries(m)) {
-    if (v === null || v === undefined) continue;
-    out[`m_${k}`] = typeof v === "number" ? Math.round(v * 1000) / 1000 : v;
+
+function readTests() {
+  try {
+    const raw = localStorage.getItem(STORAGE_TESTS);
+    if (!raw) return /** @type {Record<string, TestRecord[]>} */ ({});
+    const o = JSON.parse(raw);
+    return typeof o === "object" && o ? o : {};
+  } catch {
+    return {};
   }
-  return out;
+}
+
+function writeTests(/** @type {Record<string, TestRecord[]>} */ data) {
+  try {
+    localStorage.setItem(STORAGE_TESTS, JSON.stringify(data));
+  } catch {
+    /* quota */
+  }
 }
 
 /**
+ * Saves this test run, returns comparison vs prior runs on the same test (before save).
  * @param {string} slug
- * @param {{ rating: number, wins: number }} summary
+ * @param {{ overall: number }} summary
+ * @returns {{ percentile: number, priorCount: number }}
  */
-export function logSessionComplete(slug, summary) {
-  if (typeof window !== "undefined" && window.posthog?.capture) {
-    window.posthog.capture("cognitive_session_complete", {
-      game_slug: slug,
-      final_rating: summary.rating,
-      wins: summary.wins,
-    });
-  }
+export function recordTestAndCompare(slug, summary) {
+  const all = readTests();
+  const listRaw = all[slug];
+  const list = Array.isArray(listRaw) ? listRaw : [];
+  const priorCount = list.length;
+  const below = list.filter((t) => t.overall < summary.overall).length;
+  const percentile = priorCount > 0 ? Math.round((below / priorCount) * 100) : 0;
+
+  list.push({ slug, at: Date.now(), overall: summary.overall });
+  all[slug] = list.slice(-MAX_TESTS_PER_SLUG);
+  writeTests(all);
+  return { percentile, priorCount };
 }
 
 /**
@@ -170,13 +175,14 @@ export function clearCognitiveLocalStorage() {
   try {
     localStorage.removeItem(STORAGE_SESSIONS);
     localStorage.removeItem(STORAGE_ROUNDS);
+    localStorage.removeItem(STORAGE_TESTS);
   } catch {
     /* ignore */
   }
 }
 
 /**
- * @returns {{ sessionRows: number, roundRows: number, gamesWithSessions: number }}
+ * @returns {{ sessionRows: number, gamesWithSessions: number, testRows: number, testsWithRuns: number }}
  */
 export function cognitiveStorageStats() {
   const sessions = readSessions();
@@ -184,9 +190,15 @@ export function cognitiveStorageStats() {
   for (const v of Object.values(sessions)) {
     sessionRows += Array.isArray(v) ? v.length : 0;
   }
+  const tests = readTests();
+  let testRows = 0;
+  for (const v of Object.values(tests)) {
+    testRows += Array.isArray(v) ? v.length : 0;
+  }
   return {
     sessionRows,
-    roundRows: readRounds().length,
     gamesWithSessions: Object.keys(sessions).length,
+    testRows,
+    testsWithRuns: Object.keys(tests).length,
   };
 }

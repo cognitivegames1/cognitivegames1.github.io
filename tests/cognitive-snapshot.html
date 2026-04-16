@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" data-test-slug="cognitive-snapshot" data-lobby-href="../index.html">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cognitive Snapshot - Cognitive Games</title>
+    <meta name="description" content="A fixed-protocol cognitive benchmark covering memory, attention, inhibition, and spatial recall. Same stages every run." />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="/tests/cognitive-snapshot.html" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../css/chessboard.css" />
+    <link rel="stylesheet" href="../css/styles.css" />
+  </head>
+  <body>
+    <header class="play-top">
+      <a class="back-link" href="../index.html">&larr; Lobby</a>
+      <h1 id="play-title">Cognitive Snapshot</h1>
+      <div class="stat-line" aria-live="polite">
+        <span id="stat-time">0.00s</span>
+        <span class="sep">·</span>
+        <span>Stage <strong id="stat-stage">0/0</strong></span>
+      </div>
+      <button type="button" class="btn ghost small" id="btn-restart">Restart</button>
+    </header>
+    <main class="play-main">
+      <section class="instructions-inline" id="instructions-panel">
+        <p class="lead">Fixed protocol. Same stages every run, so scores are comparable over time.</p>
+        <div id="instructions-text"></div>
+        <div><button type="button" class="btn" id="btn-start-test">Start test</button></div>
+      </section>
+
+      <div class="game-root" id="test-root"></div>
+
+      <section class="result-panel hidden" id="result-panel" aria-live="polite">
+        <div id="result-body"></div>
+        <div><button type="button" class="btn" id="btn-play-again">Run again</button></div>
+      </section>
+    </main>
+    <script type="module" src="../js/tests/play.js"></script>
+  </body>
+</html>

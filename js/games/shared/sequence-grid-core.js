@@ -1,53 +1,58 @@
-import { createTileGrid } from "../../lib/tile-grid.js";
+import { createTileGrid, enableTileGrid } from "../../lib/tile-grid.js";
 import { randInt, shuffle } from "../../lib/random.js";
+import { MISTAKE_FLASH_MS } from "../../lib/feedback.js";
 import { delay } from "../../lib/async.js";
-import { createRoundRuntime } from "./round-runtime.js";
-import { showSessionComplete } from "./results.js";
+import { mountGame } from "./game-session.js";
 
 /**
+ * @typedef {import('./task.js').TaskResult} TaskResult
+ * @typedef {import('./task.js').TaskEnv} TaskEnv
  * @typedef {{
  *   timings: (difficulty: number) => { onMs: number, offMs: number },
- *   expectedOrder: (sequence: number[]) => number[],
+ *   generateSequence?: (difficulty: number) => { size: number, sequence: number[] } | null,
+ *   expectedOrder?: (sequence: number[]) => number[],
  *   userPhaseText: string,
- *   failOnFirstMistake?: boolean,
- *   successThreshold: number,
+ *   onWrongTap?: 'fail' | 'rewind',
+ *   successRule?: 'threshold' | 'completed',
+ *   successThreshold?: number,
  *   pointsForSuccess: (args: { difficulty: number, length: number, accuracy: number }) => number,
  *   metrics: (args: { length: number, correctSteps: number, mistakes: number }) => Record<string, number | string | boolean | null>,
- *   roundResult: (args: {
- *     success: boolean,
- *     points: number,
- *     correctSteps: number,
- *     mistakes: number,
- *     length: number,
- *     progress: { round: number, totalRounds: number, nextDifficulty: number },
- *   }) => { title: string, detail: string },
  * }} GridSequenceOptions
  */
 
+function defaultSequence(difficulty) {
+  const size = difficulty <= 2 ? 3 : 4;
+  const n = size * size;
+  const seqMin = Math.min(n, 2 + difficulty);
+  const seqMax = Math.min(n, 4 + difficulty);
+  const seqLen = randInt(seqMin, Math.max(seqMin, seqMax));
+  const sequence = shuffle([...Array(n)].map((_, i) => i)).slice(0, seqLen);
+  return { size, sequence };
+}
+
 /**
+ * Pure single-round task. Resolves with TaskResult, or null if cancelled.
+ *
  * @param {HTMLElement} root
- * @param {import('../../play-shell.js').GameShell} shell
+ * @param {TaskEnv} env
  * @param {GridSequenceOptions} opts
+ * @returns {Promise<TaskResult | null>}
  */
-export function mountGridSequenceGame(root, shell, opts) {
-  const runtime = createRoundRuntime(root, shell);
-  const teardown = runtime.teardown;
-  const reset = runtime.reset;
+export function runGridSequenceTask(root, env, opts) {
+  const { difficulty, isActive } = env;
+  const onWrongTap = opts.onWrongTap || "fail";
+  const successRule = opts.successRule || "threshold";
 
-  async function beginRound() {
-    const myRound = runtime.beginRound();
+  const generated = opts.generateSequence
+    ? opts.generateSequence(difficulty)
+    : defaultSequence(difficulty);
+  if (!generated) return Promise.resolve(null);
 
-    const difficulty = shell.getDifficulty();
-    const size = difficulty <= 2 ? 3 : 4;
-    const n = size * size;
-    const seqMin = Math.min(n, 2 + difficulty);
-    const seqMax = Math.min(n, 4 + difficulty);
-    const seqLen = randInt(seqMin, Math.max(seqMin, seqMax));
-    const { onMs, offMs } = opts.timings(difficulty);
+  const { size, sequence } = generated;
+  const expectedOrder = opts.expectedOrder ? opts.expectedOrder(sequence) : sequence;
+  const { onMs, offMs } = opts.timings(difficulty);
 
-    const sequence = shuffle([...Array(n)].map((_, i) => i)).slice(0, seqLen);
-    const expectedOrder = opts.expectedOrder(sequence);
-
+  return new Promise(async (resolve) => {
     const phase = document.createElement("p");
     phase.className = "phase-label";
     phase.textContent = "Watch the sequence…";
@@ -59,128 +64,119 @@ export function mountGridSequenceGame(root, shell, opts) {
     const { tiles } = createTileGrid(wrap, size, { interactive: false });
 
     for (const idx of sequence) {
-      if (!runtime.isActive(myRound)) return;
+      if (!isActive()) return resolve(null);
       tiles[idx].classList.add("highlight", "flash");
       await delay(onMs);
-      if (!runtime.isActive(myRound)) return;
+      if (!isActive()) return resolve(null);
       tiles[idx].classList.remove("highlight", "flash");
       await delay(offMs);
     }
-
-    if (!runtime.isActive(myRound)) return;
+    if (!isActive()) return resolve(null);
 
     phase.textContent = opts.userPhaseText;
-    for (const t of tiles) {
-      t.disabled = false;
-      t.classList.add("interactive");
-    }
 
     let step = 0;
     let done = false;
     let resolving = false;
     let correctSteps = 0;
     let mistakes = 0;
+    const length = expectedOrder.length;
+
+    const finish = (success, points) => {
+      done = true;
+      for (const t of tiles) t.disabled = true;
+      const quality = successRule === "completed"
+        ? ((correctSteps + mistakes) ? correctSteps / (correctSteps + mistakes) : 0)
+        : (length ? correctSteps / length : 0);
+      resolve({
+        success,
+        quality,
+        points,
+        metrics: opts.metrics({ length, correctSteps, mistakes }),
+        summary: `Correct ${correctSteps}/${length}, mistakes ${mistakes}.`,
+      });
+    };
 
     const onClick = async (i) => {
-      if (done || resolving || !runtime.isActive(myRound)) return;
+      if (done || resolving || !isActive()) return;
       resolving = true;
       const pressed = tiles[i];
       pressed.classList.add("flash");
-      window.setTimeout(() => {
-        pressed.classList.remove("flash");
-      }, 180);
+      window.setTimeout(() => pressed.classList.remove("flash"), 180);
 
       const expected = expectedOrder[step];
       if (i !== expected) {
         mistakes += 1;
         pressed.classList.add("mark-wrong");
         tiles[expected].classList.add("highlight");
-        await delay(260);
-        if (!runtime.isActive(myRound)) return;
+        await delay(MISTAKE_FLASH_MS);
+        if (!isActive()) { resolving = false; return resolve(null); }
         pressed.classList.remove("mark-wrong");
         tiles[expected].classList.remove("highlight");
 
-        if (opts.failOnFirstMistake) {
-          done = true;
+        if (onWrongTap === "fail") {
           for (const t of tiles) t.disabled = true;
-          const length = expectedOrder.length;
-          const accuracy = length ? correctSteps / length : 0;
-          const progress = shell.recordRound(false, 0, {
-            qualityFraction: accuracy,
-            metrics: opts.metrics({ length, correctSteps, mistakes }),
-          });
-          shell.stopTimer();
-          if (progress.done) {
-            showSessionComplete(shell, progress);
-            return;
+          phase.textContent = "Full sequence was…";
+          for (let k = 0; k < expectedOrder.length; k++) {
+            if (!isActive()) { resolving = false; return resolve(null); }
+            const cell = tiles[expectedOrder[k]];
+            cell.classList.add("highlight", "flash");
+            await delay(Math.max(140, onMs * 0.7));
+            cell.classList.remove("flash");
+            await delay(Math.max(60, offMs * 0.5));
           }
-          const result = opts.roundResult({
-            success: false,
-            points: 0,
-            correctSteps,
-            mistakes,
-            length,
-            progress,
-          });
-          shell.showResult(result.title, result.detail);
+          if (!isActive()) { resolving = false; return resolve(null); }
+          finish(false, 0);
           resolving = false;
           return;
         }
-      } else {
-        correctSteps += 1;
-        pressed.classList.add("selected");
-      }
-
-      step += 1;
-      if (step < expectedOrder.length) {
+        if (step > 0) {
+          step -= 1;
+          tiles[expectedOrder[step]].classList.remove("selected");
+        }
+        phase.textContent = `Slip — rewind to step ${step + 1}/${length}.`;
         resolving = false;
         return;
       }
 
-      done = true;
-      for (const t of tiles) t.disabled = true;
-
-      const length = expectedOrder.length;
-      const accuracy = length ? correctSteps / length : 0;
-      const success = accuracy >= opts.successThreshold;
-      const points = success
-        ? opts.pointsForSuccess({ difficulty, length, accuracy })
-        : 0;
-
-      const progress = shell.recordRound(success, points, {
-        qualityFraction: accuracy,
-        metrics: opts.metrics({ length, correctSteps, mistakes }),
-      });
-      shell.stopTimer();
-
-      if (progress.done) {
-        showSessionComplete(shell, progress);
+      correctSteps += 1;
+      pressed.classList.add("selected");
+      step += 1;
+      if (step < length) {
+        resolving = false;
         return;
       }
 
-      const result = opts.roundResult({
-        success,
-        points,
-        correctSteps,
-        mistakes,
-        length,
-        progress,
-      });
-      shell.showResult(result.title, result.detail);
+      const accuracy = successRule === "completed"
+        ? ((correctSteps + mistakes) ? correctSteps / (correctSteps + mistakes) : 0)
+        : (length ? correctSteps / length : 0);
+      const success = successRule === "completed"
+        ? true
+        : accuracy >= (opts.successThreshold ?? 1);
+      const points = success ? opts.pointsForSuccess({ difficulty, length, accuracy }) : 0;
+      finish(success, points);
       resolving = false;
     };
 
-    for (let i = 0; i < tiles.length; i++) {
-      const idx = i;
-      tiles[idx].addEventListener("click", () => {
-        void onClick(idx);
-      });
-    }
-  }
+    enableTileGrid(tiles, (idx) => { void onClick(idx); });
+  });
+}
 
-  return {
-    restart: beginRound,
-    reset,
-    destroy: teardown,
-  };
+/**
+ * Game wrapper: runs runGridSequenceTask under a full session loop.
+ *
+ * @param {HTMLElement} root
+ * @param {import('../../play-shell.js').GameShell} shell
+ * @param {GridSequenceOptions & {
+ *   buildResult: (args: {
+ *     result: TaskResult,
+ *     progress: { round: number, totalRounds: number, nextDifficulty: number },
+ *   }) => { title: string, detail: string },
+ * }} opts
+ */
+export function mountGridSequenceGame(root, shell, opts) {
+  return mountGame(root, shell, {
+    runTask: (el, env) => runGridSequenceTask(el, env, opts),
+    buildResult: opts.buildResult,
+  });
 }

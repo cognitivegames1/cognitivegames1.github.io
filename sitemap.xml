@@ -4,9 +4,6 @@
     <loc>/index.html</loc>
   </url>
   <url>
-    <loc>/games/cognitive-snapshot.html</loc>
-  </url>
-  <url>
     <loc>/games/chess-glance.html</loc>
   </url>
   <url>
@@ -29,5 +26,8 @@
   </url>
   <url>
     <loc>/games/color-word-clash.html</loc>
+  </url>
+  <url>
+    <loc>/tests/cognitive-snapshot.html</loc>
   </url>
 </urlset>

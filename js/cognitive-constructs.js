@@ -102,12 +102,6 @@ export const CONSTRUCTS = {
 
 /** Which constructs each mini-game is meant to illustrate (primary first). */
 export const GAME_CONSTRUCT_IDS = {
-  "cognitive-snapshot": [
-    "change-detection",
-    "visuospatial-stm",
-    "paired-association",
-    "visual-search-enumeration",
-  ],
   "chess-glance": ["change-detection", "visuospatial-stm"],
   "piece-recall": ["spatial-binding", "visuospatial-stm"],
   "pattern-grid": ["visuospatial-stm"],

@@ -3,43 +3,50 @@ import { buildBoardChange } from "../lib/chess-change.js";
 import { randomPlacements } from "../lib/chess-position.js";
 import { randInt } from "../lib/random.js";
 import { delay } from "../lib/async.js";
-import { createRoundRuntime } from "./shared/round-runtime.js";
-import { showSessionComplete } from "./shared/results.js";
+import { mountGame } from "./shared/game-session.js";
 
 export const instructionsHtml = `
   <strong>Chess Glance</strong> — Study the board briefly. It disappears, then a new board appears with
   one additional piece. Tap the square where the new piece appeared.`;
 
+/** @type {import('./shared/task.js').TaskMeta} */
+export const taskMeta = { domains: ["memory", "attention"] };
+
+function generateChange(minPieces, maxPieces) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const placements = randomPlacements(minPieces, maxPieces);
+    const change = buildBoardChange(placements, { singleSquareOnly: true, addOnly: true });
+    if (change) return { placements, change };
+  }
+  const fallback = randomPlacements(4, 5);
+  const change = buildBoardChange(fallback, { singleSquareOnly: true, addOnly: true });
+  return change ? { placements: fallback, change } : null;
+}
+
 /**
  * @param {HTMLElement} root
- * @param {import('../play-shell.js').GameShell} shell
+ * @param {import('./shared/task.js').TaskEnv} env
+ * @returns {Promise<import('./shared/task.js').TaskResult | null>}
  */
-export function mount(root, shell) {
-  const runtime = createRoundRuntime(root, shell);
-  const teardown = runtime.teardown;
-  const reset = runtime.reset;
+export function runTask(root, env) {
+  const { difficulty, isActive } = env;
+  const memorizeMs = randInt(
+    Math.max(1700, 4800 - difficulty * 480),
+    Math.max(2300, 5800 - difficulty * 500),
+  );
+  const clearMs = Math.max(600, 1300 - difficulty * 120);
+  const minPieces = 4 + difficulty;
+  const maxPieces = Math.min(minPieces + 3, 16);
 
-  async function beginRound() {
-    const myRound = runtime.beginRound();
+  const generated = generateChange(minPieces, maxPieces);
+  if (!generated) return Promise.resolve(null);
 
-    const difficulty = shell.getDifficulty();
-    const memorizeMs = randInt(
-      Math.max(1800, 5200 - difficulty * 500),
-      Math.max(2200, 6200 - difficulty * 520),
-    );
-    const minPieces = 4 + difficulty;
-    const maxPieces = Math.min(minPieces + 3, 16);
+  const { placements: placements1, change } = generated;
+  const placements2 = change.nextPlacements;
+  const changedSquares = change.changedSquares;
+  const questionCount = changedSquares.length;
 
-    const placements1 = randomPlacements(minPieces, maxPieces);
-    const change = buildBoardChange(placements1, {
-      singleSquareOnly: true,
-      addOnly: true,
-    });
-    if (!change) return;
-    const placements2 = change.nextPlacements;
-    const changedSquares = change.changedSquares;
-    const questionCount = changedSquares.length;
-
+  return new Promise(async (resolve) => {
     const phase = document.createElement("p");
     phase.className = "phase-label";
     phase.textContent = "Memorize the position…";
@@ -50,17 +57,15 @@ export function mount(root, shell) {
     createChessBoard(wrap1, placements1, { interactive: false });
 
     await delay(memorizeMs);
-    if (!runtime.isActive(myRound)) return;
-
+    if (!isActive()) return resolve(null);
     wrap1.remove();
 
-    // Briefly show an empty board between phases to avoid transition cues.
     phase.textContent = "Clearing board…";
     const clearWrap = document.createElement("div");
     root.appendChild(clearWrap);
     createChessBoard(clearWrap, {}, { interactive: false });
-    await delay(1000);
-    if (!runtime.isActive(myRound)) return;
+    await delay(clearMs);
+    if (!isActive()) return resolve(null);
     clearWrap.remove();
 
     phase.innerHTML = `Find the changed square${questionCount === 1 ? "" : "s"}.`;
@@ -70,27 +75,25 @@ export function mount(root, shell) {
 
     const found = new Set();
     let attempts = 0;
-    const attemptLimit = questionCount + 2;
+    const attemptLimit = questionCount + 1;
 
     const board = createChessBoard(wrap2, placements2, {
       interactive: true,
       onCellClick: (sq) => {
-        if (!runtime.isActive(myRound)) return;
+        if (!isActive()) return;
         if (attempts >= attemptLimit || found.size >= questionCount) return;
         attempts += 1;
         const correct = changedSquares.includes(sq) && !found.has(sq);
         if (correct) found.add(sq);
 
+        const roundOver = found.size >= questionCount || attempts >= attemptLimit;
         board.clearMarks();
-        for (const s of found) board.setHighlight(s, "mark-correct");
+        const highlightSet = roundOver ? changedSquares : [...found];
+        for (const s of highlightSet) board.setHighlight(s, "mark-correct");
         if (!correct) board.setHighlight(sq, "mark-wrong");
 
         phase.innerHTML = `Found ${found.size}/${questionCount} new square${questionCount === 1 ? "" : "s"}. Attempts ${attempts}/${attemptLimit}.`;
-        if (found.size < questionCount && attempts < attemptLimit) return;
-
-        board.clearMarks();
-        for (const s of changedSquares) board.setHighlight(s, "mark-correct");
-        if (!correct) board.setHighlight(sq, "mark-wrong");
+        if (!roundOver) return;
 
         const qualityFraction = questionCount > 0 ? found.size / questionCount : 0;
         const success = found.size === questionCount;
@@ -98,32 +101,36 @@ export function mount(root, shell) {
         const pts = success
           ? Math.round((100 + difficulty * 14) * (0.58 + 0.42 * attemptFactor))
           : 0;
-        const progress = shell.recordRound(success, pts, {
-          qualityFraction,
+        resolve({
+          success,
+          quality: qualityFraction,
+          points: pts,
           metrics: {
             chessGlanceTargets: questionCount,
             chessGlanceFound: found.size,
             chessGlanceAttempts: attempts,
+            chessGlanceChange: change.summary,
           },
+          summary: `Found ${found.size}/${questionCount}. Change: ${change.summary}.`,
         });
-
-        shell.stopTimer();
-        if (progress.done) {
-          showSessionComplete(shell, progress);
-          return;
-        }
-
-        shell.showResult(
-          success ? "Board changes tracked." : "Some changes missed.",
-          `${success ? `+${pts} points. ` : ""}Found ${found.size}/${questionCount}. Change: ${change.summary}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
-        );
       },
     });
-  }
+  });
+}
 
-  return {
-    restart: beginRound,
-    reset,
-    destroy: teardown,
-  };
+/**
+ * @param {HTMLElement} root
+ * @param {import('../play-shell.js').GameShell} shell
+ */
+export function mount(root, shell) {
+  return mountGame(root, shell, {
+    runTask,
+    buildResult({ result, progress }) {
+      const m = /** @type {any} */ (result.metrics);
+      return {
+        title: result.success ? "Board changes tracked." : "Some changes missed.",
+        detail: `${result.success ? `+${result.points} points. ` : ""}Found ${m.chessGlanceFound}/${m.chessGlanceTargets}. Change: ${m.chessGlanceChange}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
+      };
+    },
+  });
 }

@@ -1,33 +1,30 @@
-import { createTileGrid } from "../lib/tile-grid.js";
+import { createTileGrid, enableTileGrid } from "../lib/tile-grid.js";
 import { pickN, randInt } from "../lib/random.js";
 import { delay } from "../lib/async.js";
-import { createRoundRuntime } from "./shared/round-runtime.js";
-import { showSessionComplete } from "./shared/results.js";
+import { mountGame } from "./shared/game-session.js";
 
 export const instructionsHtml = `
   <strong>Pattern Grid</strong> — A pattern flashes briefly. Tap only the cells that were highlighted.
   The first wrong tap fails the round immediately.`;
 
+/** @type {import('./shared/task.js').TaskMeta} */
+export const taskMeta = { domains: ["memory", "spatial"] };
+
 /**
  * @param {HTMLElement} root
- * @param {import('../play-shell.js').GameShell} shell
+ * @param {import('./shared/task.js').TaskEnv} env
+ * @returns {Promise<import('./shared/task.js').TaskResult | null>}
  */
-export function mount(root, shell) {
-  const runtime = createRoundRuntime(root, shell);
-  const teardown = runtime.teardown;
-  const reset = runtime.reset;
+export function runTask(root, env) {
+  const { difficulty, isActive } = env;
+  const size = difficulty <= 2 ? 3 : difficulty === 3 ? 4 : 5;
+  const n = size * size;
+  const kMin = Math.max(2, Math.min(n - 1, 2 + difficulty));
+  const kMax = Math.max(kMin, Math.min(n - 1, 4 + difficulty));
+  const k = randInt(kMin, kMax);
+  const target = new Set(pickN([...Array(n)].map((_, i) => i), k));
 
-  async function beginRound() {
-    const myRound = runtime.beginRound();
-
-    const difficulty = shell.getDifficulty();
-    const size = difficulty <= 2 ? 3 : difficulty === 3 ? 4 : 5;
-    const n = size * size;
-    const kMin = Math.max(2, Math.min(n - 1, 1 + difficulty * 2));
-    const kMax = Math.max(kMin, Math.min(n - 1, 3 + difficulty * 2));
-    const k = randInt(kMin, kMax);
-    const target = new Set(pickN([...Array(n)].map((_, i) => i), k));
-
+  return new Promise(async (resolve) => {
     const phase = document.createElement("p");
     phase.className = "phase-label";
     phase.textContent = "Memorize the highlighted cells…";
@@ -42,88 +39,86 @@ export function mount(root, shell) {
       if (target.has(i)) tiles[i].classList.add("highlight");
     }
 
-    const previewMs = size === 3 ? 1800 : size === 4 ? 1500 : 1250;
+    const previewMs = Math.max(1200, Math.min(2600, 300 * k));
     await delay(previewMs);
-    if (!runtime.isActive(myRound)) return;
+    if (!isActive()) return resolve(null);
 
-    for (let i = 0; i < tiles.length; i++) {
-      tiles[i].classList.remove("highlight");
-    }
-
+    for (let i = 0; i < tiles.length; i++) tiles[i].classList.remove("highlight");
     phase.textContent = "Tap only the cells from memory. First mistake fails.";
 
     /** @type {Set<number>} */
     const found = new Set();
     let done = false;
 
-    for (let i = 0; i < tiles.length; i++) {
-      const idx = i;
+    enableTileGrid(tiles, (idx) => {
+      if (done || !isActive()) return;
+      if (found.has(idx)) return;
       const btn = tiles[idx];
-      btn.disabled = false;
-      btn.classList.add("interactive");
-      btn.addEventListener("click", () => {
-        if (done || !runtime.isActive(myRound)) return;
-        if (found.has(idx)) return;
 
-        if (!target.has(idx)) {
-          done = true;
-          btn.classList.add("mark-wrong");
-          for (const t of tiles) t.disabled = true;
-          const quality = target.size > 0 ? found.size / target.size : 0;
-          const progress = shell.recordRound(false, 0, {
-            qualityFraction: quality,
-            metrics: {
-              patternCells: target.size,
-              patternCorrect: found.size,
-              patternMistakes: 1,
-            },
-          });
-          shell.stopTimer();
-          if (progress.done) {
-            showSessionComplete(shell, progress);
-            return;
-          }
-          shell.showResult(
-            "Pattern broken.",
-            `Wrong tile (red). Correct ${found.size}/${target.size}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
-          );
-          return;
+      if (!target.has(idx)) {
+        done = true;
+        btn.classList.add("mark-wrong");
+        for (const t of tiles) t.disabled = true;
+        for (const targetIdx of target) {
+          if (!found.has(targetIdx)) tiles[targetIdx].classList.add("mark-correct");
         }
+        const quality = target.size > 0 ? found.size / target.size : 0;
+        resolve({
+          success: false,
+          quality,
+          points: 0,
+          metrics: {
+            patternCells: target.size,
+            patternCorrect: found.size,
+            patternMistakes: 1,
+          },
+          summary: `Broken at ${found.size}/${target.size}.`,
+        });
+        return;
+      }
 
-        found.add(idx);
-        btn.classList.add("selected");
-        btn.disabled = true;
-        phase.textContent = `Correct ${found.size}/${target.size}.`;
+      found.add(idx);
+      btn.classList.add("selected");
+      btn.disabled = true;
+      phase.textContent = `Correct ${found.size}/${target.size}.`;
 
-        if (found.size === target.size) {
-          done = true;
-          const pts = Math.round(88 + target.size * 8 + difficulty * 6);
-          const progress = shell.recordRound(true, pts, {
-            qualityFraction: 1,
-            metrics: {
-              patternCells: target.size,
-              patternCorrect: found.size,
-              patternMistakes: 0,
-            },
-          });
-          shell.stopTimer();
-          if (progress.done) {
-            showSessionComplete(shell, progress);
-            return;
+      if (found.size === target.size) {
+        done = true;
+        const pts = Math.round(88 + target.size * 8 + difficulty * 6);
+        resolve({
+          success: true,
+          quality: 1,
+          points: pts,
+          metrics: {
+            patternCells: target.size,
+            patternCorrect: found.size,
+            patternMistakes: 0,
+          },
+          summary: `Full ${target.size}/${target.size}.`,
+        });
+      }
+    });
+  });
+}
+
+/**
+ * @param {HTMLElement} root
+ * @param {import('../play-shell.js').GameShell} shell
+ */
+export function mount(root, shell) {
+  return mountGame(root, shell, {
+    runTask,
+    buildResult({ result, progress }) {
+      const m = /** @type {any} */ (result.metrics);
+      return result.success
+        ? {
+            title: "Pattern captured.",
+            detail: `+${result.points} points. Correct ${m.patternCorrect}/${m.patternCells}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
           }
-          shell.showResult(
-            "Pattern captured.",
-            `+${pts} points. Correct ${found.size}/${target.size}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
-          );
-          return;
-        }
-      });
-    }
-  }
-
-  return {
-    restart: beginRound,
-    reset,
-    destroy: teardown,
-  };
+        : {
+            title: "Pattern broken.",
+            detail: `Wrong tile (red). Correct ${m.patternCorrect}/${m.patternCells}. Round ${progress.round}/${progress.totalRounds}. Next level: ${progress.nextDifficulty}.`,
+          };
+    },
+  });
 }

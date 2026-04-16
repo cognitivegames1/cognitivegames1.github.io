@@ -78,7 +78,7 @@ export function createChessBoard(container, placements, options = {}) {
   const boardId = `cg-board-${Math.random().toString(36).slice(2, 10)}`;
   host.id = boardId;
 
-  chessboardFactory(boardId, {
+  const boardInstance = chessboardFactory(boardId, {
     draggable: false,
     showNotation: false,
     position: toChessboardPosition(placements),
@@ -120,6 +120,9 @@ export function createChessBoard(container, placements, options = {}) {
       markCells.forEach((cell) => {
         cell.classList.remove("mark-correct", "mark-wrong");
       });
+    },
+    setPosition(nextPlacements) {
+      boardInstance?.position?.(toChessboardPosition(nextPlacements ?? {}), false);
     },
   };
 }

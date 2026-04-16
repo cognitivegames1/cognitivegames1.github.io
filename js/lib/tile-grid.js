@@ -34,3 +34,18 @@ export function createTileGrid(container, size, options = {}) {
   container.appendChild(grid);
   return { grid, tiles };
 }
+
+/**
+ * Turn a non-interactive tile set into an interactive one after render.
+ * @param {HTMLButtonElement[]} tiles
+ * @param {(index: number) => void} onTileClick
+ */
+export function enableTileGrid(tiles, onTileClick) {
+  for (let i = 0; i < tiles.length; i++) {
+    const idx = i;
+    const tile = tiles[idx];
+    tile.disabled = false;
+    tile.classList.add("interactive");
+    tile.addEventListener("click", () => onTileClick(idx));
+  }
+}

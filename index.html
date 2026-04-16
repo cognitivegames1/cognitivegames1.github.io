@@ -4,54 +4,49 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cognitive Games</title>
-    <meta
-      name="description"
-      content="Browser-based cognitive mini games for memory, focus, and spatial reasoning. Play free rounds with no account required."
-    />
+    <meta name="description" content="Short cognitive games for memory, attention, and spatial skills. No sign-in." />
     <link rel="canonical" href="/index.html" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="css/styles.css" />
   </head>
-  <body class="index-body">
-    <div class="page lobby-page">
-      <header class="hero-split">
-        <div class="hero-main">
-          <p class="hero-label">Cognitive Games</p>
-          <h1>Simple Brain Games</h1>
-          <p class="hero-text">
-            Short rounds for memory, attention, and spatial skills.
-            No sign-in, no progression grind.
-          </p>
-          <p class="hero-note">
-            <span id="hero-game-count">0 games</span>
-            <span id="hero-category-count">0 categories active</span>
-          </p>
-        </div>
+  <body>
+    <main class="page stack stack-lg">
+      <header class="stack stack-sm measure">
+        <p class="site-title">Cognitive Games</p>
+        <h1 class="site-tagline">Short rounds for <em>memory</em>, <em>attention</em>, and <em>spatial</em> skills.</h1>
+        <p class="site-sub">Browser-only. No account. Scores live on this device; anonymous pageviews only.</p>
       </header>
 
-      <section class="deck-controls">
-        <p class="deck-copy" id="deck-copy">
-          Pick a track and launch a round.
-        </p>
-        <nav class="filter-row" id="filter-chips" aria-label="Filter by category"></nav>
-      </section>
+      <div class="lobby-nav">
+        <nav class="tabs" id="mode-tabs" aria-label="Content mode">
+          <button type="button" class="tab" data-mode="games" aria-pressed="true">Games</button>
+          <button type="button" class="tab" data-mode="tests" aria-pressed="false">Tests</button>
+        </nav>
+        <nav class="chip-row" id="filter-chips" aria-label="Filter by category"></nav>
+      </div>
 
-      <section class="games-stage" id="games-stage" aria-live="polite"></section>
+      <section class="card-grid" id="games-stage" aria-live="polite"></section>
 
-      <section class="research-strip" id="research-note" aria-labelledby="research-heading">
-        <h2 class="research-strip-title" id="research-heading">About scores and cognitive science</h2>
-        <p class="research-strip-text" id="research-disclaimer"></p>
-        <p class="research-strip-hint">
-          In each game, open <strong>What cognitive processes this relates to</strong> for construct names and
-          references. Session ratings compare fairly to your own past runs on this device, not to a national norm.
-        </p>
-      </section>
-    </div>
+      <footer class="lobby-footer">
+        <p class="footer-label">Background</p>
+        <details class="details-block" id="about-scores">
+          <summary>About scores and cognitive science</summary>
+          <p id="research-disclaimer"></p>
+          <p>Ratings compare to your own past runs on this device, not to a national norm.</p>
+        </details>
+        <details class="details-block" id="privacy-block">
+          <summary>Data and privacy</summary>
+          <p id="telemetry-privacy-line"></p>
+          <p class="hint">Anonymous pageviews are sent to PostHog (us.i.posthog.com) so I can see visit counts. No account, no personal data, no cross-site tracking.</p>
+          <button type="button" class="btn ghost small" id="btn-clear-local">Clear local history</button>
+        </details>
+      </footer>
+    </main>
 
     <script type="module" src="js/lobby.js"></script>
   </body>

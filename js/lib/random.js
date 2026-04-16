@@ -1,13 +1,15 @@
 export function randInt(min, max) {
+  if (max < min) [min, max] = [max, min];
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 /**
  * @template T
  * @param {T[]} arr
- * @returns {T}
+ * @returns {T | undefined}
  */
 export function pick(arr) {
+  if (arr.length === 0) return undefined;
   return arr[randInt(0, arr.length - 1)];
 }
 
