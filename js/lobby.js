@@ -1,4 +1,4 @@
-import "./lib/analytics.js";
+import("./lib/analytics.js").catch(() => {});
 import { RESEARCH_DISCLAIMER } from "./cognitive-constructs.js";
 import { CATEGORIES, GAMES, gamesForFilter } from "./games-data.js";
 import { TESTS } from "./tests-data.js";

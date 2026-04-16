@@ -1,4 +1,4 @@
-import "../lib/analytics.js";
+import("../lib/analytics.js").catch(() => {});
 import { findTest } from "../tests-data.js";
 import { runTest } from "./test-shell.js";
 import { renderTestReport } from "./test-results.js";
