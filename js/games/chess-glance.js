@@ -34,7 +34,7 @@ export function runTask(root, env) {
     Math.max(1700, 4800 - difficulty * 480),
     Math.max(2300, 5800 - difficulty * 500),
   );
-  const clearMs = Math.max(600, 1300 - difficulty * 120);
+  const clearMs = Math.max(120, 260 - difficulty * 25);
   const minPieces = 4 + difficulty;
   const maxPieces = Math.min(minPieces + 3, 16);
 

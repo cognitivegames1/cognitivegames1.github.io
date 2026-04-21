@@ -121,6 +121,10 @@ export function runTask(root, env) {
           phase.textContent = `Pairs ${matched}/${pairCount}. Tries: ${attempts}.`;
           lock = false;
           if (matched >= pairCount) finishWin();
+          else if (attempts >= maxAttempts) {
+            for (const c of cards) c.el.disabled = true;
+            finishFail();
+          }
           return;
         }
 

@@ -13,10 +13,12 @@ import { mountGame } from "./game-session.js";
  *   expectedOrder?: (sequence: number[]) => number[],
  *   userPhaseText: string,
  *   onWrongTap?: 'fail' | 'rewind',
+ *   revealExpectedOnWrong?: boolean,
  *   successRule?: 'threshold' | 'completed',
  *   successThreshold?: number,
+ *   quality?: (args: { length: number, correctSteps: number, mistakes: number, step: number }) => number,
  *   pointsForSuccess: (args: { difficulty: number, length: number, accuracy: number }) => number,
- *   metrics: (args: { length: number, correctSteps: number, mistakes: number }) => Record<string, number | string | boolean | null>,
+ *   metrics: (args: { length: number, correctSteps: number, mistakes: number, step: number }) => Record<string, number | string | boolean | null>,
  * }} GridSequenceOptions
  */
 
@@ -41,6 +43,7 @@ function defaultSequence(difficulty) {
 export function runGridSequenceTask(root, env, opts) {
   const { difficulty, isActive } = env;
   const onWrongTap = opts.onWrongTap || "fail";
+  const revealExpectedOnWrong = opts.revealExpectedOnWrong !== false;
   const successRule = opts.successRule || "threshold";
 
   const generated = opts.generateSequence
@@ -81,18 +84,24 @@ export function runGridSequenceTask(root, env, opts) {
     let correctSteps = 0;
     let mistakes = 0;
     const length = expectedOrder.length;
+    const currentQuality = () => {
+      if (opts.quality) {
+        return opts.quality({ length, correctSteps, mistakes, step });
+      }
+      return successRule === "completed"
+        ? ((correctSteps + mistakes) ? correctSteps / (correctSteps + mistakes) : 0)
+        : (length ? correctSteps / length : 0);
+    };
 
     const finish = (success, points) => {
       done = true;
       for (const t of tiles) t.disabled = true;
-      const quality = successRule === "completed"
-        ? ((correctSteps + mistakes) ? correctSteps / (correctSteps + mistakes) : 0)
-        : (length ? correctSteps / length : 0);
+      const quality = currentQuality();
       resolve({
         success,
         quality,
         points,
-        metrics: opts.metrics({ length, correctSteps, mistakes }),
+        metrics: opts.metrics({ length, correctSteps, mistakes, step }),
         summary: `Correct ${correctSteps}/${length}, mistakes ${mistakes}.`,
       });
     };
@@ -108,11 +117,11 @@ export function runGridSequenceTask(root, env, opts) {
       if (i !== expected) {
         mistakes += 1;
         pressed.classList.add("mark-wrong");
-        tiles[expected].classList.add("highlight");
+        if (revealExpectedOnWrong) tiles[expected].classList.add("highlight");
         await delay(MISTAKE_FLASH_MS);
         if (!isActive()) { resolving = false; return resolve(null); }
         pressed.classList.remove("mark-wrong");
-        tiles[expected].classList.remove("highlight");
+        if (revealExpectedOnWrong) tiles[expected].classList.remove("highlight");
 
         if (onWrongTap === "fail") {
           for (const t of tiles) t.disabled = true;
@@ -147,9 +156,7 @@ export function runGridSequenceTask(root, env, opts) {
         return;
       }
 
-      const accuracy = successRule === "completed"
-        ? ((correctSteps + mistakes) ? correctSteps / (correctSteps + mistakes) : 0)
-        : (length ? correctSteps / length : 0);
+      const accuracy = currentQuality();
       const success = successRule === "completed"
         ? true
         : accuracy >= (opts.successThreshold ?? 1);

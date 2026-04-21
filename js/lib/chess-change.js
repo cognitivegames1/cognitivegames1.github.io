@@ -23,12 +23,14 @@ function randomExtraPiece(placements) {
     counts.set(piece, (counts.get(piece) ?? 0) + 1);
   }
 
-  const choices = Object.entries(EXTRA_PIECE_LIMITS)
-    .filter(([piece, limit]) => (counts.get(piece) ?? 0) < limit)
-    .map(([piece]) => piece);
+  const weighted = Object.entries(EXTRA_PIECE_LIMITS)
+    .flatMap(([piece, limit]) => {
+      const remaining = limit - (counts.get(piece) ?? 0);
+      return remaining > 0 ? Array(remaining).fill(piece) : [];
+    });
 
-  if (choices.length === 0) return null;
-  return pick(choices);
+  if (weighted.length === 0) return null;
+  return pick(weighted);
 }
 
 /**

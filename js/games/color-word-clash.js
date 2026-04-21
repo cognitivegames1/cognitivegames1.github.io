@@ -35,8 +35,6 @@ export function runTask(root, env) {
   let correct = 0;
   let misses = 0;
   let totalResponseMs = 0;
-  /** @type {null | (() => void)} */
-  let pendingResolve = null;
 
   const phase = document.createElement("p");
   phase.className = "phase-label";
@@ -51,6 +49,27 @@ export function runTask(root, env) {
   root.appendChild(row);
 
   return (async () => {
+    let cancelled = false;
+
+    /**
+     * @param {(finish: () => void) => void} run
+     */
+    const waitForTrial = (run) => new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        window.clearInterval(cancelWatch);
+        resolve();
+      };
+      const cancelWatch = window.setInterval(() => {
+        if (settled || isActive()) return;
+        cancelled = true;
+        finish();
+      }, 100);
+      run(finish);
+    });
+
     for (let t = 0; t < trialCount; t++) {
       if (!isActive()) return null;
       phase.textContent = `Trial ${t + 1}/${trialCount} — match the ink color in ${Number((responseMs / 1000).toFixed(1))}s.`;
@@ -71,11 +90,10 @@ export function runTask(root, env) {
       /** @type {Map<string, HTMLButtonElement>} */
       const swatchByKey = new Map();
 
-      await new Promise((resolve) => {
-        pendingResolve = resolve;
+      await waitForTrial((finish) => {
         let settled = false;
         const timeoutId = window.setTimeout(async () => {
-          if (!isActive() || settled) return;
+          if (!isActive() || settled) return finish();
           settled = true;
           misses += 1;
           totalResponseMs += responseMs;
@@ -83,8 +101,7 @@ export function runTask(root, env) {
           swatchByKey.get(ink.key)?.classList.add("mark-correct");
           phase.textContent = `Too slow. Trial ${t + 1}/${trialCount}.`;
           await delay(FEEDBACK_REVEAL_MS);
-          pendingResolve = null;
-          resolve();
+          finish();
         }, responseMs);
         for (const c of choices) {
           const b = document.createElement("button");
@@ -94,7 +111,8 @@ export function runTask(root, env) {
           b.setAttribute("aria-label", c.label);
           swatchByKey.set(c.key, b);
           b.addEventListener("click", async () => {
-            if (!isActive() || settled) return;
+            if (settled) return;
+            if (!isActive()) return finish();
             settled = true;
             window.clearTimeout(timeoutId);
             disableControls(row.querySelectorAll("button"));
@@ -109,13 +127,12 @@ export function runTask(root, env) {
               correctBtn?.classList.add("mark-correct");
             }
             await delay(FEEDBACK_REVEAL_MS);
-            pendingResolve = null;
-            resolve();
+            finish();
           });
           row.appendChild(b);
         }
       });
-      if (!isActive()) return null;
+      if (cancelled || !isActive()) return null;
     }
 
     const success = correct >= passThreshold;

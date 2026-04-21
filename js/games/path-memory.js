@@ -30,6 +30,22 @@ function randomPath(size, len) {
   return path;
 }
 
+function fallbackPath(size, targetLen) {
+  const len = Math.max(3, Math.min(targetLen, size));
+  const horizontal = randInt(0, 1) === 0;
+  const reversed = randInt(0, 1) === 1;
+  if (horizontal) {
+    const row = randInt(0, size - 1);
+    const startCol = randInt(0, size - len);
+    const seq = [...Array(len)].map((_, i) => row * size + startCol + i);
+    return reversed ? seq.reverse() : seq;
+  }
+  const col = randInt(0, size - 1);
+  const startRow = randInt(0, size - len);
+  const seq = [...Array(len)].map((_, i) => (startRow + i) * size + col);
+  return reversed ? seq.reverse() : seq;
+}
+
 function generatePath(difficulty) {
   const size = difficulty <= 2 ? 4 : difficulty <= 4 ? 5 : 6;
   const targetLen = Math.min(size * size - 2, 3 + difficulty * 2);
@@ -39,7 +55,10 @@ function generatePath(difficulty) {
       if (path) return { size, sequence: path };
     }
   }
-  return null;
+  return {
+    size,
+    sequence: fallbackPath(size, targetLen),
+  };
 }
 
 export const instructionsHtml = `
@@ -60,15 +79,20 @@ const pathOpts = {
   generateSequence: generatePath,
   userPhaseText: "Retrace the path on the grid.",
   onWrongTap: "rewind",
-  successRule: "completed",
+  revealExpectedOnWrong: false,
+  successRule: "threshold",
+  successThreshold: 0.85,
+  quality({ length, mistakes }) {
+    return length > 0 ? length / (length + mistakes) : 0;
+  },
   pointsForSuccess({ difficulty, length, accuracy }) {
     return Math.round((75 + length * 10 + difficulty * 8) * (0.6 + 0.4 * accuracy));
   },
-  metrics({ length, correctSteps, mistakes }) {
+  metrics({ length, mistakes }) {
     return {
       pathLength: length,
       pathMistakes: mistakes,
-      pathTaps: correctSteps + mistakes,
+      pathTaps: length + mistakes,
     };
   },
 };

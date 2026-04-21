@@ -63,6 +63,19 @@ export function runTask(root, env) {
 
   return new Promise((resolve) => {
     const t0 = performance.now();
+    let next = 1;
+    let resolving = false;
+    let mistakes = 0;
+    let timedOut = false;
+    let capTimer = 0;
+    let ended = false;
+    const cancelWatch = window.setInterval(() => {
+      if (ended || isActive()) return;
+      ended = true;
+      if (capTimer) window.clearTimeout(capTimer);
+      window.clearInterval(cancelWatch);
+      resolve(null);
+    }, 100);
 
     const phase = document.createElement("p");
     phase.className = "phase-label";
@@ -90,17 +103,11 @@ export function runTask(root, env) {
       buttons.push(btn);
     }
 
-    let next = 1;
-    let resolving = false;
-    let mistakes = 0;
-    let timedOut = false;
-    let capTimer = 0;
-    let ended = false;
-
     const finishWin = () => {
       if (ended) return;
       ended = true;
       if (capTimer) window.clearTimeout(capTimer);
+      window.clearInterval(cancelWatch);
       disableControls(buttons);
       const ms = performance.now() - t0;
       const timeBonus = Math.min(180, Math.max(0, Math.round(320 - ms / 42)));
@@ -118,6 +125,7 @@ export function runTask(root, env) {
       if (ended) return;
       ended = true;
       if (capTimer) window.clearTimeout(capTimer);
+      window.clearInterval(cancelWatch);
       disableControls(buttons);
       const ms = performance.now() - t0;
       const progressFraction = count > 0 ? (next - 1) / count : 0;
@@ -157,7 +165,12 @@ export function runTask(root, env) {
           expected?.classList.add("mark-correct");
           phase.textContent = `Wrong tap. You needed ${next}.`;
           await delay(MISTAKE_FLASH_MS);
-          if (!isActive()) return resolve(null);
+          if (!isActive()) {
+            if (capTimer) window.clearTimeout(capTimer);
+            window.clearInterval(cancelWatch);
+            ended = true;
+            return resolve(null);
+          }
           finishFail();
           return;
         }
